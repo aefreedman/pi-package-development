@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.tgz
+evals/**/latest-results.json
+evals/**/.latest-results.tmp-*.json

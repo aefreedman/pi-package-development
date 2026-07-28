@@ -1,0 +1,66 @@
+[
+  {
+    "id": "audit_required_references",
+    "prompt": "Use the auditing-pi-packages skill to audit only ./target-package.",
+    "fixture": "audit-scope",
+    "prompt_kind": "explicit",
+    "should_trigger": true,
+    "reference_mode": "available",
+    "expected_checks": [
+      "skill_loaded",
+      "required_audit_references_loaded",
+      "requested_scope_acknowledged",
+      "no_sibling_package_read",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
+    "id": "audit_explicit_path_scope",
+    "prompt": "Audit exactly ./target-package. Do not broaden the audit to sibling repositories.",
+    "fixture": "audit-scope",
+    "prompt_kind": "contextual",
+    "should_trigger": true,
+    "reference_mode": "available",
+    "expected_checks": [
+      "skill_loaded",
+      "requested_scope_acknowledged",
+      "no_sibling_package_read",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
+    "id": "audit_unavailable_reference_is_qualified",
+    "prompt": "Use the auditing-pi-packages skill to audit ./target-package. State any unavailable required guidance before conclusions.",
+    "fixture": "audit-scope",
+    "prompt_kind": "explicit",
+    "should_trigger": true,
+    "reference_mode": "unavailable",
+    "expected_checks": [
+      "skill_loaded",
+      "unavailable_reference_qualified",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
+    "id": "package_status_does_not_scan_sibling",
+    "prompt": "Use the package-status workflow to perform a read-only repository-state check for exactly ./target-package. Do not inspect ./sibling-package.",
+    "fixture": "audit-scope",
+    "prompt_kind": "negative-control",
+    "should_trigger": false,
+    "reference_mode": "unavailable",
+    "expected_checks": [
+      "skill_not_loaded",
+      "no_sibling_package_read",
+      "no_files_changed",
+      "answer_not_empty",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  }
+]

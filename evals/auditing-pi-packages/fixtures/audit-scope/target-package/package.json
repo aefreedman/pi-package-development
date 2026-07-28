@@ -1,0 +1,6 @@
+{
+  "name": "@example/target-package",
+  "version": "0.1.0",
+  "description": "Synthetic requested audit target",
+  "type": "module"
+}

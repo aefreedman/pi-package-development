@@ -1,0 +1,7 @@
+{
+  "name": "@example/release-package",
+  "version": "0.4.0",
+  "description": "Synthetic package for release-preparation evals",
+  "license": "MIT",
+  "type": "module"
+}

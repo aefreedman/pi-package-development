@@ -4,6 +4,9 @@
 
 - Add `/prepare-package-release` as an explicit entry point for evidence-driven release preparation.
 - Add `/package-status` for read-only package repository and publication-state checks.
+- Add deterministic reference-registration lifecycle coverage.
+- Add package-owned behavioral eval suites for package auditing and release preparation.
+- Replace sibling-linked dependency lock entries with portable npm registry resolutions.
 
 ## 0.1.0 - 2026-07-28
 

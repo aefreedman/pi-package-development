@@ -19,6 +19,7 @@
     "references",
     "skills",
     "prompts",
+    "evals",
     "tests",
     "README.md",
     "CHANGELOG.md",
@@ -33,6 +34,8 @@
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "eval:audit": "node --experimental-strip-types evals/auditing-pi-packages/run-eval.ts",
+    "eval:release": "node --experimental-strip-types evals/preparing-pi-package-releases/run-eval.ts",
     "pack:check": "npm pack --dry-run"
   },
   "publishConfig": {
