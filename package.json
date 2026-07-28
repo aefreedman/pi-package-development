@@ -1,0 +1,69 @@
+{
+  "name": "@aefree/pi-package-development",
+  "version": "0.1.0",
+  "description": "Methods, architecture guidance, and workflows for developing Pi packages.",
+  "type": "module",
+  "sideEffects": [
+    "./extensions/index.ts"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "package-development",
+    "architecture"
+  ],
+  "files": [
+    "dist",
+    "src",
+    "extensions",
+    "references",
+    "skills",
+    "prompts",
+    "tests",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aefree/pi-capability-registry": "^0.1.0",
+    "@aefree/pi-package-references": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/aefreedman/pi-package-development.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aefreedman/pi-package-development/issues"
+  },
+  "homepage": "https://github.com/aefreedman/pi-package-development#readme"
+}
