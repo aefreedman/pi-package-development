@@ -8,6 +8,8 @@
 - The `auditing-pi-packages` skill
 - The `preparing-pi-package-releases` skill
 - The `/audit-package <package-path>` prompt template
+- The `/prepare-package-release <package-path>` prompt template
+- The `/package-status <package-path> [...]` prompt template
 
 ## Installation
 

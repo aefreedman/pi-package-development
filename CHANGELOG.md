@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `/prepare-package-release` as an explicit entry point for evidence-driven release preparation.
+- Add `/package-status` for read-only package repository and publication-state checks.
+
 ## 0.1.0 - 2026-07-28
 
 - Add package-development reference publishing, package auditing guidance, and an `/audit-package` prompt.
