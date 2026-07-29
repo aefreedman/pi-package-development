@@ -58,9 +58,10 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 
 ### Prompt as hidden workflow engine
 
-- **Evidence:** a large prompt duplicates reusable procedure or policy instead of invoking a skill.
-- **Failure:** the workflow is available only through remembered manual invocation and drifts from other entry points.
-- **Remediation:** move reusable behavior to a discoverable skill and keep the prompt thin.
+- **Evidence:** a prompt duplicates a procedure intended for reuse or ordinary-language activation. Supporting evidence may include documentation promising implicit activation, multiple entry points duplicating the procedure, another workflow needing to invoke it, or tests expecting non-prompt activation. Prompt size alone is not evidence.
+- **Not a smell:** prompt ownership is intentional when explicit invocation is the activation boundary and repository evidence supports that design, such as documentation or tests rejecting implicit activation. If intent is not established, record an unresolved design question or omit the finding rather than inferring a defect.
+- **Failure:** reusable behavior is available only through remembered manual invocation or drifts across entry points despite evidence that broader reuse is intended.
+- **Remediation:** when reuse is established, move reusable behavior to a discoverable skill and keep the prompt thin. Otherwise preserve the prompt-owned boundary and, if useful, document the intentional exception.
 
 ### Mixed semantic ownership
 
