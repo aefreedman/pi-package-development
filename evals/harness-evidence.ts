@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstat, readdir } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 export type ObservedToolCall = {
   id: string;
@@ -40,7 +41,39 @@ export function hasCompleteMandatoryEvidence(toolCalls: ObservedToolCall[], fina
 }
 
 export function isMissingFileError(cause: string | undefined): boolean {
-  return Boolean(cause && /(?:\bENOENT\b|no such file|cannot find (?:the )?file|file not found)/i.test(cause));
+  if (!cause?.trim()) return false;
+  const codes = cause.match(/\bE[A-Z][A-Z0-9_]*\b/g) ?? [];
+  if (codes.length > 0) {
+    if (!codes.every((code) => code === "ENOENT")) return false;
+    let structuredMessage: unknown;
+    try { structuredMessage = JSON.parse(cause)?.message; } catch { /* Not structured JSON. */ }
+    return /^(?:error:\s*)?ENOENT\b/i.test(cause.trim())
+      || /["']code["']\s*:\s*["']ENOENT["']/i.test(cause)
+      || (typeof structuredMessage === "string" && /^(?:error:\s*)?ENOENT\b/i.test(structuredMessage.trim()));
+  }
+  // Code-less native errors are accepted only when the complete cause is a missing-file outcome.
+  return /^(?:error:\s*)?(?:no such file(?: or directory)?|cannot find (?:the )?file|file not found)\s*$/i.test(cause.trim());
+}
+
+/** Reject links in staged inputs so lexical target containment cannot be redirected outside it. */
+export async function assertNoSymlinks(root: string): Promise<void> {
+  const metadata = await lstat(root);
+  if (metadata.isSymbolicLink()) throw new Error(`Staged fixture contains a symlink or junction: ${root}`);
+  if (!metadata.isDirectory()) return;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Staged fixture contains a symlink or junction: ${path}`);
+    if (entry.isDirectory()) await assertNoSymlinks(path);
+  }
+}
+
+export function hasDirectlyNegatedQualification(answer: string, subject: "policy" | "release"): boolean {
+  const concept = subject === "policy"
+    ? "(?:policy|convention)[ -]?(?:complete|completeness)"
+    : "release[- ]?(?:ready|readiness)";
+  const negated = new RegExp(`\\b(?:cannot|can't|unable to|will not|do not|don't)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\bnot\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)?\\s*not\\s+(?:confirmed|established|complete|demonstrated|claimed)\\b`, "i");
+  const affirmative = new RegExp(`\\b(?:can|may|will)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\b(?:it|this|the)\\s+(?:audit|assessment|package|release)?\\s*(?:is|are|was|were|remains|appears)\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)\\s+(?:confirmed|established|complete|demonstrated)\\b`, "i");
+  return negated.test(answer) && !affirmative.test(answer);
 }
 
 function readPath(args: unknown): string | undefined {

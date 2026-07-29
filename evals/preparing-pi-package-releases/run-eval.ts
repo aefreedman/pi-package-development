@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateCustomCheck, type CheckContext } from "./checks.ts";
-import { collectToolCalls, countUnexpectedToolErrors, createTerminationController, hasCompleteMandatoryEvidence } from "../harness-evidence.ts";
+import { assertNoSymlinks, collectToolCalls, countUnexpectedToolErrors, createTerminationController, hasCompleteMandatoryEvidence } from "../harness-evidence.ts";
 
 type Condition = "available" | "baseline";
 type EvalConfig = {
@@ -228,6 +228,8 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   }
   const consumerTargetRoot = join(consumerCwd, testCase.consumer_target_path);
   if (relative(consumerCwd, consumerTargetRoot).startsWith("..") || isAbsolute(relative(consumerCwd, consumerTargetRoot)) || !existsSync(consumerTargetRoot)) throw new Error(`Missing scoped consumer target for case ${testCase.id}: ${testCase.consumer_target_path}`);
+  await assertNoSymlinks(consumerCwd);
+  await assertNoSymlinks(installedPackageRoot);
   const before = await snapshot(workspace);
   const args = ["--mode", "json", "--no-session", "--no-approve", "--no-context-files", "--no-extensions"];
   for (const extension of config.extensionPaths) args.push("--extension", resolve(here, extension));

@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { hasDirectlyNegatedQualification, isMissingFileError } from "../harness-evidence.ts";
 
 export type ToolCall = { name: string; args: unknown; failed: boolean; errorCause?: string; argsCaptured?: boolean };
 export type CheckContext = {
@@ -30,10 +31,6 @@ function exactInstalledRead(context: CheckContext, path: string, failed: boolean
   return context.toolCalls.some((call) => call.name === "read" && call.failed === failed && readPath(call) === expected);
 }
 
-function isMissingFileError(cause: string | undefined): boolean {
-  return Boolean(cause && /(?:\bENOENT\b|no such file|cannot find (?:the )?file|file not found)/i.test(cause));
-}
-
 function referencesSibling(context: CheckContext): boolean {
   return context.toolCalls.some((call) => JSON.stringify(call.args).replaceAll("\\", "/").includes("sibling-package"));
 }
@@ -48,8 +45,7 @@ function referencesConsumerCwdReference(context: CheckContext): boolean {
 
 function qualifiesUnavailableReference(answer: string): boolean {
   const saysUnavailable = /(?:required\s+reference|reference)[\s\S]{0,120}(?:unavailable|not available|could not|unable)|(?:unavailable|not available|could not|unable)[\s\S]{0,120}(?:required\s+reference|reference)/i.test(answer);
-  const declinesCompleteClaim = /(?:cannot|can't|do not|don't|unable to|not)\s+(?:claim|provide|give|make)[\s\S]{0,120}(?:policy|convention)[ -]?(?:complete|completeness)|(?:policy|convention)[ -]?(?:complete|completeness)[\s\S]{0,80}(?:cannot|can't|do not|don't|not)|not\s+claimed\s+as\s+(?:an?\s+)?(?:policy|convention)[ -]?(?:complete|completeness)[\s\S]{0,80}audit/i.test(answer);
-  return saysUnavailable && declinesCompleteClaim;
+  return saysUnavailable && hasDirectlyNegatedQualification(answer, "policy");
 }
 
 export function evaluateCustomCheck(checkId: string, context: CheckContext): boolean | undefined {

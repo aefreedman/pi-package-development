@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const audit = await import("../evals/auditing-pi-packages/checks.ts");
 const release = await import("../evals/preparing-pi-package-releases/checks.ts");
@@ -32,15 +34,28 @@ test("available negative controls pass only without skill-specific reference beh
   assert.equal(release.evaluateCustomCheck("no_skill_specific_reference_behavior", context([{ name: "read", args: { path: releaseReference }, failed: true, errorCause: "ENOENT" }])), false);
 });
 
-test("unavailable reference qualification accepts exact-path missing-file failures and the observed audit wording", () => {
+test("unavailable-reference qualification requires a direct negated conclusion", () => {
   const exactMissing = { name: "read", args: { path: releaseReference }, failed: true, errorCause: "ENOENT: no such file" };
-  assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([exactMissing])), true);
+  assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable, so I cannot confirm release readiness." }), true);
+  assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable; release readiness is not confirmed, but the package is release-ready." }), false);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, errorCause: "EACCES: permission denied" }])), false);
+  assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, errorCause: "ENOENT plus EACCES: no such file" }])), false);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, args: { path: "references/package-development/release-readiness.md" } }])), false);
   const auditMissing = { name: "read", args: { path: auditReference }, failed: true, errorCause: "ENOENT: no such file" };
-  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "The required reference is unavailable; this is not claimed as a policy-complete package audit." }), true);
-  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "This is not claimed as a policy-complete package audit." }), false);
+  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "The required reference is unavailable; I cannot claim a policy-complete audit." }), true);
+  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "The required reference is unavailable; I cannot claim a policy-complete audit, but the audit is policy-complete." }), false);
+  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "The required reference is unavailable; this is not claimed as an audit." }), false);
   assert.equal(audit.evaluateCustomCheck("no_cwd_reference_fallback", context([{ name: "read", args: { path: "references/package-development/conventions.md" }, failed: true }])), false);
+});
+
+test("missing-file classification accepts only pure missing outcomes", () => {
+  assert.equal(evidence.isMissingFileError("ENOENT: no such file"), true);
+  assert.equal(evidence.isMissingFileError('{"code":"ENOENT","message":"missing"}'), true);
+  assert.equal(evidence.isMissingFileError("file not found"), true);
+  assert.equal(evidence.isMissingFileError("ENOENT plus EACCES: permission denied"), false);
+  assert.equal(evidence.isMissingFileError("The manual says file not found if it is absent."), false);
+  assert.equal(evidence.isMissingFileError("A prior ENOENT was incidental prose."), false);
+  assert.equal(evidence.isMissingFileError("EACCES: file not found"), false);
 });
 
 test("read-only optional ENOENT probes are bounded to the declared consumer target", () => {
@@ -53,6 +68,20 @@ test("read-only optional ENOENT probes are bounded to the declared consumer targ
   assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "./sibling-package/optional.md" } }], [], roots), 1);
   assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "references/package-development/conventions.md" } }], [], roots), 1);
   assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "./target-package/../sibling-package/optional.md" } }], [], roots), 1);
+});
+
+test("staged fixture symlink escapes are rejected before trials", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-skill-eval-link-"));
+  try {
+    const target = join(root, "target-package");
+    const outside = join(root, "outside.md");
+    await mkdir(target);
+    await writeFile(outside, "outside");
+    await symlink(outside, join(target, "escape.md"));
+    await assert.rejects(evidence.assertNoSymlinks(root), /symlink or junction/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("unavailable-reference allowance rejects an unrelated tool error", () => {
@@ -101,6 +130,7 @@ test("runners do not fake forced slash invocation", async () => {
     assert.match(source, /child\.once\("close", resolveExit\)/);
     assert.match(source, /consumer_target_path/);
     assert.match(source, /targetRoot: consumerTargetRoot/);
+    assert.match(source, /assertNoSymlinks\(consumerCwd\)/);
     assert.doesNotMatch(source, /\/skill:\$\{/);
   }
 });
