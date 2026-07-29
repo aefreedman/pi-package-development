@@ -40,19 +40,33 @@ export function hasCompleteMandatoryEvidence(toolCalls: ObservedToolCall[], fina
     && toolCalls.every((call) => call.argsCaptured && call.ended && (!call.failed || Boolean(call.errorCause)));
 }
 
-export function isMissingFileError(cause: string | undefined): boolean {
-  if (!cause?.trim()) return false;
-  const codes = cause.match(/\bE[A-Z][A-Z0-9_]*\b/g) ?? [];
-  if (codes.length > 0) {
-    if (!codes.every((code) => code === "ENOENT")) return false;
-    let structuredMessage: unknown;
-    try { structuredMessage = JSON.parse(cause)?.message; } catch { /* Not structured JSON. */ }
-    return /^(?:error:\s*)?ENOENT\b/i.test(cause.trim())
-      || /["']code["']\s*:\s*["']ENOENT["']/i.test(cause)
-      || (typeof structuredMessage === "string" && /^(?:error:\s*)?ENOENT\b/i.test(structuredMessage.trim()));
-  }
-  // Code-less native errors are accepted only when the complete cause is a missing-file outcome.
-  return /^(?:error:\s*)?(?:no such file(?: or directory)?|cannot find (?:the )?file|file not found)\s*$/i.test(cause.trim());
+function missingFileMessage(message: string, path: string): boolean {
+  const quotedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // This is the native Node read/access error shape. Do not accept appended diagnostics.
+  return new RegExp(`^(?:Error:\\s*)?ENOENT: no such file(?: or directory)?, (?:open|access|stat|lstat) ['\"]${quotedPath}['\"]$`, "i").test(message.trim());
+}
+
+/**
+ * Accept only the native read-tool ENOENT outcome for the requested path. The harness records
+ * tool results as serialized JSON, so inspect its complete, known result shape rather than
+ * searching arbitrary diagnostic text.
+ */
+export function isMissingFileError(cause: string | undefined, requestedPath?: string): boolean {
+  if (!cause?.trim() || !requestedPath) return false;
+  let parsed: unknown;
+  try { parsed = JSON.parse(cause); } catch { return missingFileMessage(cause, requestedPath); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+
+  const result = parsed as Record<string, unknown>;
+  // Pi's native tool result is one text content item. Extra fields/items can carry unrelated errors.
+  if (Object.keys(result).length !== 1 || !Array.isArray(result.content) || result.content.length !== 1) return false;
+  const [content] = result.content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) return false;
+  const textPart = content as Record<string, unknown>;
+  return Object.keys(textPart).length === 2
+    && textPart.type === "text"
+    && typeof textPart.text === "string"
+    && missingFileMessage(textPart.text, requestedPath);
 }
 
 /** Reject links in staged inputs so lexical target containment cannot be redirected outside it. */
@@ -70,7 +84,7 @@ export async function assertNoSymlinks(root: string): Promise<void> {
 export function hasDirectlyNegatedQualification(answer: string, subject: "policy" | "release"): boolean {
   const concept = subject === "policy"
     ? "(?:policy|convention)[ -]?(?:complete|completeness)"
-    : "release[- ]?(?:ready|readiness)";
+    : "(?:release[- ]?(?:ready|readiness)|ready for release)";
   const negated = new RegExp(`\\b(?:cannot|can't|unable to|will not|do not|don't)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\bnot\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)?\\s*not\\s+(?:confirmed|established|complete|demonstrated|claimed)\\b`, "i");
   const affirmative = new RegExp(`\\b(?:can|may|will)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\b(?:it|this|the)\\s+(?:audit|assessment|package|release)?\\s*(?:is|are|was|were|remains|appears)\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)\\s+(?:confirmed|established|complete|demonstrated)\\b`, "i");
   return negated.test(answer) && !affirmative.test(answer);
@@ -99,8 +113,10 @@ export function countUnexpectedToolErrors(toolCalls: Pick<ObservedToolCall, "nam
     if (!call.failed) return false;
     const path = readPath(call.args);
     const allowedUnavailableReference = path !== undefined && allowedMissingReferencePaths.includes(path);
-    const allowedConsumerProbe = path !== undefined && allowedMissingConsumerRoots.some(({ consumerCwd, targetRoot }) => isSafePathWithinRoot(path, consumerCwd, targetRoot));
-    return call.name !== "read" || path === undefined || !isMissingFileError(call.errorCause)
+    const consumerRoot = path === undefined ? undefined : allowedMissingConsumerRoots.find(({ consumerCwd, targetRoot }) => isSafePathWithinRoot(path, consumerCwd, targetRoot));
+    const allowedConsumerProbe = consumerRoot !== undefined;
+    const requestedPath = consumerRoot && path !== undefined ? resolve(consumerRoot.consumerCwd, path) : path;
+    return call.name !== "read" || requestedPath === undefined || !isMissingFileError(call.errorCause, requestedPath)
       || (!allowedUnavailableReference && !allowedConsumerProbe);
   }).length;
 }

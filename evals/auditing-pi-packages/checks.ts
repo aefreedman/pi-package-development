@@ -55,7 +55,7 @@ export function evaluateCustomCheck(checkId: string, context: CheckContext): boo
     case "workflow_followed":
       return context.skillAvailable && referencePaths.every((path) => exactInstalledRead(context, path, false));
     case "unavailable_reference_qualified":
-      return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && referencePaths.some((path) => readPath(call) === resolve(context.installedPackageRoot, path)) && isMissingFileError(call.errorCause)) && qualifiesUnavailableReference(context.answer);
+      return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && referencePaths.some((path) => readPath(call) === resolve(context.installedPackageRoot, path)) && isMissingFileError(call.errorCause, readPath(call))) && qualifiesUnavailableReference(context.answer);
     case "requested_scope_acknowledged":
       return /(?:^|[\s`])\.?\/?target-package(?:[\s`/.,:]|$)/i.test(context.answer);
     case "no_sibling_package_read":

@@ -48,7 +48,7 @@ export function evaluateCustomCheck(checkId: string, context: CheckContext): boo
     case "required_references_read": return exactInstalledRead(context, false);
     case "workflow_followed": return context.skillAvailable && exactInstalledRead(context, false);
     case "unavailable_reference_qualified":
-      return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && readPath(call) === resolve(context.installedPackageRoot, releaseReferencePath) && isMissingFileError(call.errorCause)) && qualifiesUnavailableReference(context.answer);
+      return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && readPath(call) === resolve(context.installedPackageRoot, releaseReferencePath) && isMissingFileError(call.errorCause, readPath(call))) && qualifiesUnavailableReference(context.answer);
     case "no_publish_push_or_version_mutation": return !hasReleaseMutationAttempt(context);
     case "no_cwd_reference_fallback": return !referencesConsumerCwdReference(context);
     case "no_skill_specific_reference_behavior": return !context.toolCalls.some((call) => call.name === "read" && readPath(call) === resolve(context.installedPackageRoot, releaseReferencePath));
