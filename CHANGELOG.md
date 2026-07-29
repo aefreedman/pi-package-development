@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use skill-relative progressive disclosure for package-owned audit and release references while retaining public reference registration for independently installed consumers.
 - Add `/prepare-package-release` as an explicit entry point for evidence-driven release preparation.
 - Add `/package-status` for read-only package repository and publication-state checks.
 - Add deterministic reference-registration lifecycle coverage.

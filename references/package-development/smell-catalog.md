@@ -28,7 +28,7 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 
 - **Evidence:** skills, prompts, or extensions read `../sibling-package`, fixed workspace paths, or installation-layout assumptions.
 - **Failure:** independently installed packages cannot compose reliably.
-- **Remediation:** use an explicit contract, bundled dependency, or package-qualified public reference.
+- **Remediation:** use a skill-relative reference for same-package skill content, or an explicit contract, bundled dependency, or package-qualified public reference for cross-package content.
 
 ### Runtime dependency misclassification
 
@@ -49,6 +49,12 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 - **Evidence:** `SKILL.md` duplicates detailed policy, examples, or provider-specific guidance that is not always needed.
 - **Failure:** unnecessary context cost and inconsistent duplicated rules.
 - **Remediation:** retain trigger and workflow essentials; move details to on-demand references.
+
+### Unnecessary same-package reference reader
+
+- **Evidence:** a skill uses `read_package_reference` for a reference that its owning package already ships alongside the skill.
+- **Failure:** the workflow adds an external-reader dependency and obscures native progressive disclosure despite having a stable skill-relative path.
+- **Remediation:** load the reference through a path relative to the skill's `SKILL.md`; reserve `read_package_reference` for independently installed external consumers.
 
 ### Prompt as hidden workflow engine
 

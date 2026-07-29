@@ -7,20 +7,20 @@ description: Audit a Pi package for structural, dependency, documentation, skill
 
 Audit against the package-development conventions without loading unrelated guidance.
 
-## Required References
+## Required Package-Local References
 
-Before claiming a convention-complete audit, use `read_package_reference` to load these references from `@aefree/pi-package-development`:
+Before claiming a convention-complete audit, load these references on demand using their paths relative to this `SKILL.md`:
 
-1. `references/package-development/conventions.md`
-2. `references/package-development/smell-catalog.md`
-3. `references/package-development/audit-method.md`
+1. [package-development conventions](../../references/package-development/conventions.md)
+2. [package-development smell catalog](../../references/package-development/smell-catalog.md)
+3. [package audit method](../../references/package-development/audit-method.md)
 
-If the tool or a required reference is unavailable, report that limitation and do not claim a policy-complete audit.
+Do not use `read_package_reference` for these package-owned files. Reserve it for references exposed by independently installed external packages. If a required local reference cannot be read, report that limitation and do not claim a policy-complete audit.
 
 ## Workflow
 
 1. Confirm the exact package root and read its `package.json`.
-2. Load the required references.
+2. Load the required package-local references.
 3. Inventory only publishable source, generated output, documentation, skills, prompts, extensions, tests, fixtures, evals, and lockfiles relevant to the audit.
 4. Compare observed evidence with Pi requirements, workspace conventions, and recommendations without conflating them.
 5. Run focused validation where safe. Run package commands only from the manifest root.

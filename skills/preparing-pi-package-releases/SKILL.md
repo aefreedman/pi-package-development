@@ -7,18 +7,16 @@ description: Assess and prepare Pi packages for public npm release using evidenc
 
 Prepare a package for release without inventing organization policy or silently publishing it.
 
-## Required Reference
+## Required Package-Local Reference
 
-Before claiming release readiness, use `read_package_reference` to load this reference from `@aefree/pi-package-development`:
+Before claiming release readiness, load the [release-readiness guide](../../references/package-development/release-readiness.md) on demand. Its path is relative to this `SKILL.md`.
 
-- `references/package-development/release-readiness.md`
-
-If the tool or reference is unavailable, report that limitation and do not claim a policy-complete release assessment.
+Do not use `read_package_reference` for this package-owned file. Reserve it for references exposed by independently installed external packages. If the local reference cannot be read, report that limitation and do not claim a policy-complete release assessment.
 
 ## Workflow
 
 1. Resolve the exact package root and confirm it contains `package.json`.
-2. Load the required release-readiness reference.
+2. Load the required package-local release-readiness reference.
 3. Inspect manifest metadata, Pi resources, exports, dependencies, README, changelog, and publish allowlists.
 4. Trace runtime dependencies and identify unpublished or locally satisfied prerequisites.
 5. Review every potentially packed content class for secrets and sensitive information.

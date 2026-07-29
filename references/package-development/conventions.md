@@ -25,7 +25,9 @@ Do not present a recommendation as a requirement. Record justified exceptions ra
 
 **Recommendation:** keep each skill's `SKILL.md` a concise workflow spine. Put substantial package-local detail in skill-relative references and load it only when needed.
 
-**Recommendation:** use package-qualified public references for guidance consumed across independently installed packages. Do not rely on unknown installation paths or duplicate canonical policy into each consumer.
+**Recommendation:** when a skill consumes a reference owned by its own package, use native progressive disclosure with a path resolved relative to that skill's `SKILL.md`. Do not route same-package skill references through `read_package_reference`.
+
+**Recommendation:** use package-qualified public references through `read_package_reference` only for guidance consumed across independently installed packages. Do not rely on unknown installation paths or duplicate canonical policy into each consumer.
 
 ## Ownership and composition
 
