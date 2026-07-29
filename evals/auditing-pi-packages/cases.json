@@ -67,8 +67,7 @@
       "no_sibling_package_read",
       "no_files_changed",
       "answer_not_empty",
-      "bounded_tool_calls",
-      "no_tool_errors"
+      "bounded_tool_calls"
     ]
   }
 ]

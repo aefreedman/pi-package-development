@@ -21,6 +21,10 @@ const auditReference = resolve("/work/installed-package/references/package-devel
 const releaseReference = resolve("/work/installed-package/references/package-development/release-readiness.md");
 
 function missingReadResult(path) {
+  return JSON.stringify({ content: [{ type: "text", text: `ENOENT: no such file or directory, open '${path}'` }], details: {} });
+}
+
+function strictMissingReadResult(path) {
   return JSON.stringify({ content: [{ type: "text", text: `ENOENT: no such file or directory, open '${path}'` }] });
 }
 
@@ -56,9 +60,11 @@ test("unavailable-reference qualification requires a direct negated conclusion",
 test("missing-file classification accepts only complete native read outcomes", () => {
   const native = `ENOENT: no such file or directory, open '${releaseReference}'`;
   assert.equal(evidence.isMissingFileError(native, releaseReference), true);
+  assert.equal(evidence.isMissingFileError(strictMissingReadResult(releaseReference), releaseReference), true);
   assert.equal(evidence.isMissingFileError(missingReadResult(releaseReference), releaseReference), true);
   assert.equal(evidence.isMissingFileError(`${native}\npermission denied`, releaseReference), false);
-  assert.equal(evidence.isMissingFileError(JSON.stringify({ content: [{ type: "text", text: native }], details: "permission denied" }), releaseReference), false);
+  assert.equal(evidence.isMissingFileError(JSON.stringify({ content: [{ type: "text", text: native }], details: { cause: "permission denied" } }), releaseReference), false);
+  assert.equal(evidence.isMissingFileError(JSON.stringify({ content: [{ type: "text", text: native }], details: {}, diagnostic: "trailing cause" }), releaseReference), false);
   assert.equal(evidence.isMissingFileError(JSON.stringify({ content: [{ type: "text", text: native }, { type: "text", text: "unrelated diagnostic" }] }), releaseReference), false);
   assert.equal(evidence.isMissingFileError(missingReadResult(auditReference), releaseReference), false);
   assert.equal(evidence.isMissingFileError("The manual says file not found if it is absent.", releaseReference), false);

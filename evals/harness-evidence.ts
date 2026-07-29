@@ -48,7 +48,7 @@ function missingFileMessage(message: string, path: string): boolean {
 
 /**
  * Accept only the native read-tool ENOENT outcome for the requested path. The harness records
- * tool results as serialized JSON, so inspect its complete, known result shape rather than
+ * tool results as serialized JSON, so inspect its complete, known result shapes rather than
  * searching arbitrary diagnostic text.
  */
 export function isMissingFileError(cause: string | undefined, requestedPath?: string): boolean {
@@ -58,8 +58,18 @@ export function isMissingFileError(cause: string | undefined, requestedPath?: st
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
 
   const result = parsed as Record<string, unknown>;
-  // Pi's native tool result is one text content item. Extra fields/items can carry unrelated errors.
-  if (Object.keys(result).length !== 1 || !Array.isArray(result.content) || result.content.length !== 1) return false;
+  // Pi's native tool result is one text content item, optionally with its exact empty details object.
+  // Extra fields/items can carry unrelated errors.
+  const keys = Object.keys(result);
+  const hasOnlyContent = keys.length === 1 && keys[0] === "content";
+  const hasContentAndEmptyDetails = keys.length === 2
+    && keys.includes("content")
+    && keys.includes("details")
+    && !!result.details
+    && typeof result.details === "object"
+    && !Array.isArray(result.details)
+    && Object.keys(result.details as Record<string, unknown>).length === 0;
+  if ((!hasOnlyContent && !hasContentAndEmptyDetails) || !Array.isArray(result.content) || result.content.length !== 1) return false;
   const [content] = result.content;
   if (!content || typeof content !== "object" || Array.isArray(content)) return false;
   const textPart = content as Record<string, unknown>;
