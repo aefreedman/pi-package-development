@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateCustomCheck, type CheckContext } from "./checks.ts";
-import { collectToolCalls, createTerminationController, hasCompleteMandatoryEvidence, isMissingFileError } from "../harness-evidence.ts";
+import { collectToolCalls, countUnexpectedToolErrors, createTerminationController, hasCompleteMandatoryEvidence } from "../harness-evidence.ts";
 
 type Condition = "available" | "baseline";
 type EvalConfig = {
@@ -303,13 +303,12 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const usage = assistantEnds.at(-1)?.message?.usage ?? {};
   const after = await snapshot(workspace);
   const changes = changedPaths(before, after);
-  const exactInstalledMissingReferenceRead = (call: (typeof toolCalls)[number]) => call.name === "read" && call.failed && isMissingFileError(call.errorCause) && config.requiredLocalReferencePaths.some((path) => {
-    const requestedPath = (call.args && typeof call.args === "object" && typeof (call.args as { path?: unknown }).path === "string") ? (call.args as { path: string }).path : undefined;
-    return requestedPath === join(installedPackageRoot, path);
-  });
   // Only unavailable-mode, exact installed paths, and missing-file failures are expected.
-  const expectedToolErrors = testCase.local_reference_mode === "unavailable" ? toolCalls.filter(exactInstalledMissingReferenceRead).length : 0;
-  const unexpectedToolErrors = toolErrors - expectedToolErrors;
+  const allowedMissingReferencePaths = testCase.local_reference_mode === "unavailable"
+    ? config.requiredLocalReferencePaths.map((path) => join(installedPackageRoot, path))
+    : [];
+  const unexpectedToolErrors = countUnexpectedToolErrors(toolCalls, allowedMissingReferencePaths);
+  const expectedToolErrors = toolErrors - unexpectedToolErrors;
   // --skill advertises a skill to Pi. It does not prove that the model read SKILL.md or any reference.
   const skillAvailable = condition === "available";
   const skillFileRead = toolCalls.some((call) => call.name === "read" && call.args && typeof call.args === "object" && (call.args as { path?: unknown }).path === skillPath);

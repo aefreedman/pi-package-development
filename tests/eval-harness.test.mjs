@@ -40,6 +40,13 @@ test("unavailable reference qualification accepts exact-path missing-file failur
   assert.equal(audit.evaluateCustomCheck("no_cwd_reference_fallback", context([{ name: "read", args: { path: "references/package-development/conventions.md" }, failed: true }])), false);
 });
 
+test("unavailable-reference allowance rejects an unrelated tool error", () => {
+  const qualifyingMissingRead = { name: "read", args: { path: releaseReference }, failed: true, errorCause: "ENOENT: no such file" };
+  const unrelatedPermissionError = { name: "bash", args: { command: "git status" }, failed: true, errorCause: "EACCES: permission denied" };
+  assert.equal(evidence.countUnexpectedToolErrors([qualifyingMissingRead], [releaseReference]), 0);
+  assert.equal(evidence.countUnexpectedToolErrors([qualifyingMissingRead, unrelatedPermissionError], [releaseReference]) === 0, false);
+});
+
 test("mandatory evidence keeps oversized args, failed-read cause, and the complete final answer", () => {
   const huge = "x".repeat(250_000);
   const finalAnswer = "final-".repeat(10_000);

@@ -41,6 +41,17 @@ export function isMissingFileError(cause: string | undefined): boolean {
   return Boolean(cause && /(?:\bENOENT\b|no such file|cannot find (?:the )?file|file not found)/i.test(cause));
 }
 
+/** Counts failures other than missing-file reads of explicitly allowed installed references. */
+export function countUnexpectedToolErrors(toolCalls: Pick<ObservedToolCall, "name" | "args" | "failed" | "errorCause">[], allowedMissingReferencePaths: string[]): number {
+  return toolCalls.filter((call) => {
+    if (!call.failed) return false;
+    const path = call.args && typeof call.args === "object" && typeof (call.args as { path?: unknown }).path === "string"
+      ? (call.args as { path: string }).path
+      : undefined;
+    return call.name !== "read" || path === undefined || !allowedMissingReferencePaths.includes(path) || !isMissingFileError(call.errorCause);
+  }).length;
+}
+
 /** Gives the timer a single, explicit owner and prevents it terminating an already closed child. */
 export function createTerminationController(terminate: () => Promise<void>) {
   let closed = false;

@@ -45,7 +45,8 @@
       "available_unavailable_reference_qualified",
       "no_cwd_reference_fallback",
       "no_files_changed",
-      "bounded_tool_calls"
+      "bounded_tool_calls",
+      "no_tool_errors"
     ]
   },
   {

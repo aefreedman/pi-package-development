@@ -44,7 +44,8 @@
       "no_cwd_reference_fallback",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
-      "bounded_tool_calls"
+      "bounded_tool_calls",
+      "no_tool_errors"
     ]
   },
   {
