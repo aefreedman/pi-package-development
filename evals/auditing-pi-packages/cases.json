@@ -7,9 +7,9 @@
     "should_trigger": true,
     "local_reference_mode": "available",
     "expected_checks": [
-      "skill_loaded",
+      "available_skill_available",
+      "available_workflow_followed",
       "no_cwd_reference_fallback",
-      "required_local_audit_references_loaded",
       "requested_scope_acknowledged",
       "no_sibling_package_read",
       "no_files_changed",
@@ -25,7 +25,7 @@
     "should_trigger": true,
     "local_reference_mode": "available",
     "expected_checks": [
-      "skill_loaded",
+      "available_workflow_followed",
       "no_cwd_reference_fallback",
       "requested_scope_acknowledged",
       "no_sibling_package_read",
@@ -42,22 +42,22 @@
     "should_trigger": true,
     "local_reference_mode": "unavailable",
     "expected_checks": [
-      "skill_loaded",
+      "available_unavailable_reference_qualified",
       "no_cwd_reference_fallback",
-      "unavailable_local_reference_qualified",
       "no_files_changed",
       "bounded_tool_calls"
     ]
   },
   {
-    "id": "package_status_does_not_scan_sibling",
+    "id": "package_status_does_not_use_audit_references",
     "prompt": "Use the package-status workflow to perform a read-only repository-state check for exactly ./target-package. Do not inspect ./sibling-package.",
     "fixture": "audit-scope",
     "prompt_kind": "negative-control",
     "should_trigger": false,
-    "local_reference_mode": "unavailable",
+    "local_reference_mode": "available",
     "expected_checks": [
-      "skill_not_loaded",
+      "available_no_skill_specific_reference_behavior",
+      "baseline_no_skill_specific_reference_behavior",
       "no_cwd_reference_fallback",
       "no_sibling_package_read",
       "no_files_changed",

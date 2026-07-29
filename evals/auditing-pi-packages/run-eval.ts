@@ -7,8 +7,9 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateCustomCheck, type CheckContext } from "./checks.ts";
+import { collectToolCalls, createTerminationController, hasCompleteMandatoryEvidence, isMissingFileError } from "../harness-evidence.ts";
 
-type Condition = "available" | "baseline" | "forced";
+type Condition = "available" | "baseline";
 type EvalConfig = {
   version: 1;
   skillName: string;
@@ -31,7 +32,7 @@ type Snapshot = Record<string, string>;
 const here = dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(await readFile(join(here, "eval.config.json"), "utf8")) as EvalConfig;
 const cases = JSON.parse(await readFile(join(here, "cases.json"), "utf8")) as EvalCase[];
-const supportedConditions = new Set<Condition>(["available", "baseline", "forced"]);
+const supportedConditions = new Set<Condition>(["available", "baseline"]);
 if (config.version !== 1) throw new Error(`Unsupported eval config version: ${String(config.version)}`);
 if (typeof config.skillName !== "string" || !config.skillName.trim() || typeof config.skillPath !== "string" || !config.skillPath.trim()) throw new Error("skillName and skillPath are required strings");
 if (!Array.isArray(config.extensionPaths) || config.extensionPaths.some((item) => typeof item !== "string") || new Set(config.extensionPaths).size !== config.extensionPaths.length) throw new Error("extensionPaths must contain unique strings");
@@ -232,8 +233,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   if (condition !== "baseline") args.push("--skill", skillPath);
   args.push("--tools", config.tools.join(","));
   if (options.model) args.push("--model", options.model);
-  const prompt = condition === "forced" ? `/skill:${config.skillName} ${testCase.prompt}` : testCase.prompt;
-  args.push(prompt);
+  args.push(testCase.prompt);
 
   const started = Date.now();
   const child = spawn(process.execPath, [resolvePiCliPath(), ...args], {
@@ -248,11 +248,9 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   let traceBytes = 0;
   let traceTruncated = false;
   let malformedEventLines = 0;
-  let eventLimitExceeded = false;
   let stderr = "";
   const maxTraceBytes = 200_000;
   const maxStderrBytes = 4_000;
-  const maxEvents = 1_000;
   const compactMessage = (message: any) => ({
     role: message?.role,
     responseId: message?.responseId,
@@ -267,7 +265,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
       case "agent_start": case "turn_start": case "agent_settled": return { type: event.type };
       case "message_start": case "message_end": return { type: event.type, message: compactMessage(event.message) };
       case "tool_execution_start": return { type: event.type, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args };
-      case "tool_execution_end": return { type: event.type, toolCallId: event.toolCallId, isError: Boolean(event.isError) };
+      case "tool_execution_end": return { type: event.type, toolCallId: event.toolCallId, isError: Boolean(event.isError), error: event.error, result: event.result, content: event.content, message: event.message };
       case "turn_end": return { type: event.type, message: compactMessage(event.message) };
       case "agent_end": return { type: event.type, messages: Array.isArray(event.messages) ? event.messages.map(compactMessage) : event.messages };
       default: return undefined; // Streaming updates duplicate large provider payloads and are not lifecycle evidence.
@@ -279,7 +277,6 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     try { event = JSON.parse(line); } catch { malformedEventLines += 1; return; }
     const compact = compactEvent(event);
     if (!compact) return;
-    if (events.length >= maxEvents) { eventLimitExceeded = true; return; }
     events.push(compact);
     const trace = `${JSON.stringify(compact)}\n`;
     if (traceBytes + Buffer.byteLength(trace) <= maxTraceBytes) { traceLines.push(trace); traceBytes += Buffer.byteLength(trace); }
@@ -287,37 +284,44 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   });
   child.stderr!.setEncoding("utf8");
   child.stderr!.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-maxStderrBytes); });
-  const timeout = setTimeout(() => { timedOut = true; termination = terminate(child); }, config.timeoutMs);
-  const exitCode = await new Promise<number | null>((resolveExit) => child.on("close", resolveExit));
+  const terminationController = createTerminationController(() => terminate(child));
+  const timeout = setTimeout(() => terminationController.onTimeout(), config.timeoutMs);
+  const exitCode = await new Promise<number | null>((resolveExit) => child.once("close", resolveExit));
+  terminationController.onClose();
   clearTimeout(timeout);
-  if (termination) await termination;
+  await terminationController.waitForTermination();
+  const { timedOut, terminationRequested } = terminationController.state();
   if (!output.closed) await new Promise<void>((resolveOutput) => output.once("close", resolveOutput));
 
-  const failedToolCallIds = new Set(events
-    .filter((event: any) => event.type === "tool_execution_end" && event.isError)
-    .map((event: any) => event.toolCallId));
-  const toolCalls = events.filter((event: any) => event.type === "tool_execution_start").map((event: any) => ({ name: String(event.toolName), args: event.args, failed: failedToolCallIds.has(event.toolCallId) }));
-  const toolErrors = failedToolCallIds.size;
+  const observedToolCalls = collectToolCalls(events);
+  const toolCalls = observedToolCalls.map(({ id: _id, ended: _ended, ...call }) => call);
+  const toolErrors = toolCalls.filter((call) => call.failed).length;
   const assistantEnds = events.filter((event: any) => event.type === "message_end" && event.message?.role === "assistant");
   const finalAssistant = assistantEnds.at(-1)?.message;
   const answer = assistantText(finalAssistant);
-  const streamValid = !eventLimitExceeded && malformedEventLines === 0 && finalAssistant?.stopReason === "stop" && validateEventLifecycle(events);
+  const streamValid = malformedEventLines === 0 && finalAssistant?.stopReason === "stop" && validateEventLifecycle(events);
   const usage = assistantEnds.at(-1)?.message?.usage ?? {};
   const after = await snapshot(workspace);
   const changes = changedPaths(before, after);
-  const isInstalledReferenceRead = (call: (typeof toolCalls)[number]) => call.name === "read" && config.requiredLocalReferencePaths.some((path) => {
+  const exactInstalledMissingReferenceRead = (call: (typeof toolCalls)[number]) => call.name === "read" && call.failed && isMissingFileError(call.errorCause) && config.requiredLocalReferencePaths.some((path) => {
     const requestedPath = (call.args && typeof call.args === "object" && typeof (call.args as { path?: unknown }).path === "string") ? (call.args as { path: string }).path : undefined;
-    return requestedPath !== undefined && resolve(consumerCwd, requestedPath) === join(installedPackageRoot, path);
+    return requestedPath === join(installedPackageRoot, path);
   });
-  const expectedToolErrors = testCase.local_reference_mode === "unavailable" ? toolCalls.filter((call) => call.failed && isInstalledReferenceRead(call)).length : 0;
+  // Only unavailable-mode, exact installed paths, and missing-file failures are expected.
+  const expectedToolErrors = testCase.local_reference_mode === "unavailable" ? toolCalls.filter(exactInstalledMissingReferenceRead).length : 0;
   const unexpectedToolErrors = toolErrors - expectedToolErrors;
-  // --skill registers the supplied skill in Pi's initial skill context; it need not read SKILL.md again.
-  const skillLoaded = condition !== "baseline";
-  const context: CheckContext = { answer, guidance: "", changedPaths: changes, toolCalls, toolErrors: unexpectedToolErrors, condition, skillLoaded, auditRoot: consumerCwd, consumerCwd, installedPackageRoot };
+  // --skill advertises a skill to Pi. It does not prove that the model read SKILL.md or any reference.
+  const skillAvailable = condition === "available";
+  const skillFileRead = toolCalls.some((call) => call.name === "read" && call.args && typeof call.args === "object" && (call.args as { path?: unknown }).path === skillPath);
+  const mandatoryEvidenceComplete = hasCompleteMandatoryEvidence(observedToolCalls, finalAssistant);
+  const context: CheckContext = { answer, changedPaths: changes, toolCalls, toolErrors: unexpectedToolErrors, condition, skillAvailable, skillFileRead, consumerCwd, installedPackageRoot };
 
   const evaluate = (checkId: string): boolean | null => {
-    if (checkId === "skill_loaded") return condition === "baseline" ? null : skillLoaded;
-    if (checkId === "skill_not_loaded") return condition === "baseline" || condition === "forced" ? null : !skillLoaded;
+    if (checkId === "skill_available") return skillAvailable;
+    if (checkId === "skill_file_read") return skillFileRead;
+    if (checkId === "skill_not_available") return !skillAvailable;
+    if (checkId.startsWith("available_")) return condition === "available" ? evaluate(checkId.slice("available_".length)) : null;
+    if (checkId.startsWith("baseline_")) return condition === "baseline" ? evaluate(checkId.slice("baseline_".length)) : null;
     if (checkId === "answer_not_empty") return answer.trim().length > 0;
     if (checkId === "no_files_changed") return changes.length === 0;
     if (checkId === "some_file_changed") return changes.length > 0;
@@ -335,9 +339,9 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     trial,
     shouldTrigger: testCase.should_trigger,
     promptKind: testCase.prompt_kind,
-    passed: exitCode === 0 && !timedOut && streamValid && values.length > 0 && values.every(Boolean),
+    passed: exitCode === 0 && !timedOut && streamValid && mandatoryEvidenceComplete && values.length > 0 && values.every(Boolean),
     checks,
-    observations: { skillLoaded, toolErrors, expectedToolErrors, unexpectedToolErrors, timedOut, eventLimitExceeded, traceTruncated, streamValid, malformedEventLines, stopReason: finalAssistant?.stopReason },
+    observations: { skillAvailable, skillFileRead, toolErrors, expectedToolErrors, unexpectedToolErrors, timedOut, terminationRequested, traceTruncated, streamValid, mandatoryEvidenceComplete, malformedEventLines, stopReason: finalAssistant?.stopReason },
     metrics: {
       durationMs: Date.now() - started,
       toolCalls: toolCalls.length,
@@ -345,7 +349,9 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
       exitCode,
       usage: { input: usage.input ?? 0, output: usage.output ?? 0, totalTokens: usage.totalTokens ?? 0, cost: usage.cost?.total ?? 0 },
     },
-    ...(options.includeRaw ? { answer: answer.slice(0, 20_000), stderr } : {}),
+    // Mandatory evidence is never bounded or made diagnostic-only.
+    evidence: { toolCalls, finalAnswer: answer },
+    ...(options.includeRaw ? { stderr } : {}),
     ...(options.includeEvents ? { eventTraceJsonl: traceLines.join("") } : {}),
     workspace: options.keep ? workspace : undefined,
   };
@@ -361,7 +367,6 @@ if (options.caseIds.length > 0 && selected.length !== options.caseIds.length) th
 const results: any[] = [];
 for (const testCase of selected) {
   for (const condition of options.selectedConditions) {
-    if (condition === "forced" && !testCase.should_trigger) continue;
     for (let trial = 1; trial <= options.trials; trial += 1) {
       process.stderr.write(`Running ${testCase.id} [${condition}] trial ${trial}...\n`);
       results.push(await runTrial(testCase, condition, trial, options));

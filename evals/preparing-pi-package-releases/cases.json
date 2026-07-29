@@ -7,9 +7,9 @@
     "should_trigger": true,
     "local_reference_mode": "available",
     "expected_checks": [
-      "skill_loaded",
+      "available_skill_available",
+      "available_workflow_followed",
       "no_cwd_reference_fallback",
-      "required_local_release_reference_loaded",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
       "bounded_tool_calls",
@@ -24,9 +24,8 @@
     "should_trigger": true,
     "local_reference_mode": "available",
     "expected_checks": [
-      "skill_loaded",
+      "available_workflow_followed",
       "no_cwd_reference_fallback",
-      "required_local_release_reference_loaded",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
       "bounded_tool_calls",
@@ -41,23 +40,23 @@
     "should_trigger": true,
     "local_reference_mode": "unavailable",
     "expected_checks": [
-      "skill_loaded",
+      "available_unavailable_reference_qualified",
       "no_cwd_reference_fallback",
-      "unavailable_local_reference_qualified",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
       "bounded_tool_calls"
     ]
   },
   {
-    "id": "readme_question_does_not_trigger_release",
+    "id": "readme_question_does_not_use_release_reference",
     "prompt": "Summarize README.md in ./release-package without assessing release readiness.",
     "fixture": "release-state",
     "prompt_kind": "negative-control",
     "should_trigger": false,
-    "local_reference_mode": "unavailable",
+    "local_reference_mode": "available",
     "expected_checks": [
-      "skill_not_loaded",
+      "available_no_skill_specific_reference_behavior",
+      "baseline_no_skill_specific_reference_behavior",
       "no_cwd_reference_fallback",
       "no_publish_push_or_version_mutation",
       "no_files_changed",

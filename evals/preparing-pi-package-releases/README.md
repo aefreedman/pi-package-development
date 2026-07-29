@@ -1,19 +1,20 @@
 # `preparing-pi-package-releases` behavioral eval
 
-This package-owned, opt-in suite checks release-preparation guidance. It is separate from `npm test`, does not run automatically, and has not been run against a provider.
+This opt-in suite compares an **available** target skill with a distinct no-skill **baseline**. It has not been run against a provider.
 
-## Covered behavior
+## What it grades
 
-- The release skill natively reads its required package-local release-readiness reference through `read`, without `read_package_reference`.
-- A genuinely failed required local read is explicitly qualified rather than treated as a policy-complete readiness result.
-- Release preparation performs no publish, push, or version mutation; deterministic snapshots and the no-mutation tool allowlist enforce that boundary.
-- An unrelated README request is a negative trigger control.
+`--skill` advertises the copied skill to Pi. It is not proof of recursive `SKILL.md` loading, agent activation, or package-local reference reads. Available positive cases grade observable agent compliance: an exact successful native `read` of the installed release-readiness guide plus the release safety boundary. Available negative controls pass only when no release-specific installed reference is read. Baseline results remain separate evidence rather than activation evidence.
 
-## Isolation and safety
+An unavailable-reference qualification is accepted only for unavailable mode, an attempted `read` of the exact staged installed path, and a missing-file error (`ENOENT`, “no such file”, “cannot find file”, or “file not found”). Permission and other read failures are unexpected.
 
-Each trial uses separate `consumer/` and `installed-package/` directories in a fresh temporary directory. The synthetic fixture is staged only in `consumer/`; the target skill and its package-local reference are staged only in `installed-package/`, preserving their package-relative layout. Pi starts from `consumer/`; runner preflight rejects any required reference there, and local-reference checks accept only a `read` that resolves to the staged installed-package file. `local_reference_mode: "unavailable"` removes that staged required file while retaining `read`, so qualification requires an attempted installed-package read that actually fails. Context files and approval are declined, unrelated skills are disabled, stdin is closed, and only native `read` is exposed. No extensions, shell, edit, or write tools are enabled. A temporary copy is not an OS sandbox; use trusted fixtures locally and an OS container/VM for untrusted or unattended runs.
+The noninteractive JSON runner cannot demonstrably invoke interactive `/skill:name`. There is intentionally no `forced` condition; inserting slash-command text into a prompt would not validate forced invocation.
 
-Raw answers and event traces are opt-in diagnostics and must not be committed.
+## Isolation and evidence
+
+Each trial creates separate temporary `consumer/` and `installed-package/` trees. Pi starts from `consumer/`; required references are copied only under `installed-package/`, and consumer-CWD fallback reads are rejected. Only native `read` is available. Context files, extensions, approval, unrelated skills, and stdin are disabled. No shell or mutation tool is enabled.
+
+Mandatory results retain full tool arguments, failed-read error causes, and the complete final answer independent of bounded opt-in stderr or JSONL diagnostics. Missing mandatory evidence fails. A temporary fixture copy is not an OS sandbox.
 
 ## Run deliberately
 
@@ -21,4 +22,4 @@ Raw answers and event traces are opt-in diagnostics and must not be committed.
 node --experimental-strip-types evals/preparing-pi-package-releases/run-eval.ts --condition available --trials 1
 ```
 
-Pilot with one trial, then use 3–5 trials per condition after reviewing fixtures and criteria. Compare `available` and `baseline` without treating a baseline pass as failure. `latest-results.json` is transient and excluded locally from Git and npm packaging.
+Run provider trials only after fixture and criterion review. `latest-results.json` is transient and excluded from Git and npm packaging.

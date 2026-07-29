@@ -1,19 +1,20 @@
 # `auditing-pi-packages` behavioral eval
 
-This package-owned, opt-in suite checks the audit skill and its adjacent `/package-status` prompt boundary. It is not part of `npm test` and has not been run against a provider.
+This opt-in suite compares an **available** target skill with a distinct no-skill **baseline**. It has not been run against a provider.
 
-## Covered behavior
+## What it grades
 
-- The audit skill natively reads all three required package-local references through `read`, without `read_package_reference`.
-- A genuinely failed required local read must be qualified before a policy- or convention-complete claim.
-- An explicitly named package path is acknowledged without reading the synthetic sibling package.
-- The adjacent `/package-status` request is a negative trigger control for the audit skill and must not read the sibling package.
+`--skill` makes the copied skill available to Pi; it does not prove that Pi recursively loaded `SKILL.md`, that the model activated it, or that it read any referenced file. Available positive cases therefore grade observable agent compliance: exact successful native `read` calls for all required installed-package references and the resulting workflow/scope behavior. Available negative controls pass only when no audit-specific installed reference is read. Baseline is reported separately, not treated as evidence of activation.
 
-## Isolation and safety
+A missing-reference case qualifies only an attempted `read` of the exact staged installed path in unavailable mode whose error is a missing-file error (`ENOENT`, “no such file”, “cannot find file”, or “file not found”). Other errors remain unexpected.
 
-Each trial uses separate `consumer/` and `installed-package/` directories in a fresh temporary directory. The synthetic fixture is staged only in `consumer/`; the target skill and its package-local references are staged only in `installed-package/`, preserving their package-relative layout. The runner starts Pi from `consumer/`, preflights that no required reference exists there, and accepts local-reference checks only when a `read` resolves to the staged installed-package file. Cases marked `local_reference_mode: "unavailable"` remove that staged required file while retaining `read`, so qualification is accepted only when an attempted installed-package read actually fails. Context files and project approval are declined, all skills except the copied target skill are disabled, stdin is closed, and only native `read` is permitted. No extensions, shell, or mutation tools are enabled. The temporary copy is not an OS sandbox; run only trusted fixtures locally and use OS isolation for unattended work.
+The noninteractive JSON runner cannot demonstrably execute an interactive `/skill:name` command. It deliberately has no `forced` condition and does not fake one by placing slash-command text in the prompt.
 
-Raw answers and event traces remain opt-in runner flags and must not be committed.
+## Isolation and evidence
+
+Every trial uses a fresh temporary workspace with separate `consumer/` and `installed-package/` trees. Pi starts in `consumer/`; required references exist only beneath the copied installed package. Native `read` is the only tool; context files, extensions, approval, unrelated skills, and stdin are disabled. Consumer-CWD reference fallbacks are rejected.
+
+Mandatory result evidence always retains complete tool arguments, failed-read error causes, and the complete final answer. Missing mandatory evidence fails the trial. Optional stderr and JSONL diagnostics are bounded and opt-in (`--include-raw`, `--include-events`). The temporary copy is not an OS sandbox.
 
 ## Run deliberately
 
@@ -21,4 +22,4 @@ Raw answers and event traces remain opt-in runner flags and must not be committe
 node --experimental-strip-types evals/auditing-pi-packages/run-eval.ts --condition available --trials 1
 ```
 
-Use one trial for a pilot and 3–5 per condition only after fixture and criterion review. Compare `available` with `baseline`; a baseline pass is evidence, not an eval failure. `latest-results.json` is transient and excluded locally from Git and npm packaging.
+Use provider trials only after reviewing criteria and fixtures. `latest-results.json` is transient and excluded from Git and npm packaging.

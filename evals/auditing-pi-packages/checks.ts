@@ -1,14 +1,14 @@
 import { resolve } from "node:path";
 
+export type ToolCall = { name: string; args: unknown; failed: boolean; errorCause?: string; argsCaptured?: boolean };
 export type CheckContext = {
   answer: string;
-  guidance: string;
   changedPaths: string[];
-  toolCalls: Array<{ name: string; args: unknown; failed: boolean }>;
+  toolCalls: ToolCall[];
   toolErrors: number;
-  condition: "available" | "baseline" | "forced";
-  skillLoaded: boolean;
-  auditRoot: string;
+  condition: "available" | "baseline";
+  skillAvailable: boolean;
+  skillFileRead: boolean;
   consumerCwd: string;
   installedPackageRoot: string;
 };
@@ -19,22 +19,19 @@ const referencePaths = [
   "references/package-development/audit-method.md",
 ];
 
-function readPath(call: CheckContext["toolCalls"][number]): string | undefined {
+function readPath(call: ToolCall): string | undefined {
   if (!call.args || typeof call.args !== "object") return undefined;
   const path = (call.args as { path?: unknown }).path;
   return typeof path === "string" ? path : undefined;
 }
 
-function callsInstalledLocalReference(context: CheckContext, path: string, failed: boolean): boolean {
-  const stagedReference = resolve(context.installedPackageRoot, path);
-  return context.toolCalls.some((call) =>
-    call.name === "read"
-    && call.failed === failed
-    && (() => {
-      const requestedPath = readPath(call);
-      return requestedPath !== undefined && resolve(context.consumerCwd, requestedPath) === stagedReference;
-    })(),
-  );
+function exactInstalledRead(context: CheckContext, path: string, failed: boolean): boolean {
+  const expected = resolve(context.installedPackageRoot, path);
+  return context.toolCalls.some((call) => call.name === "read" && call.failed === failed && readPath(call) === expected);
+}
+
+function isMissingFileError(cause: string | undefined): boolean {
+  return Boolean(cause && /(?:\bENOENT\b|no such file|cannot find (?:the )?file|file not found)/i.test(cause));
 }
 
 function referencesSibling(context: CheckContext): boolean {
@@ -57,16 +54,20 @@ function qualifiesUnavailableReference(answer: string): boolean {
 
 export function evaluateCustomCheck(checkId: string, context: CheckContext): boolean | undefined {
   switch (checkId) {
-    case "required_local_audit_references_loaded":
-      return referencePaths.every((path) => callsInstalledLocalReference(context, path, false));
-    case "unavailable_local_reference_qualified":
-      return referencePaths.some((path) => callsInstalledLocalReference(context, path, true)) && qualifiesUnavailableReference(context.answer);
+    case "required_references_read":
+      return referencePaths.every((path) => exactInstalledRead(context, path, false));
+    case "workflow_followed":
+      return context.skillAvailable && referencePaths.every((path) => exactInstalledRead(context, path, false));
+    case "unavailable_reference_qualified":
+      return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && referencePaths.some((path) => readPath(call) === resolve(context.installedPackageRoot, path)) && isMissingFileError(call.errorCause)) && qualifiesUnavailableReference(context.answer);
     case "requested_scope_acknowledged":
       return /(?:^|[\s`])\.?\/?target-package(?:[\s`/.,:]|$)/i.test(context.answer);
     case "no_sibling_package_read":
       return !referencesSibling(context);
     case "no_cwd_reference_fallback":
       return !referencesConsumerCwdReference(context);
+    case "no_skill_specific_reference_behavior":
+      return !context.toolCalls.some((call) => call.name === "read" && referencePaths.some((path) => readPath(call) === resolve(context.installedPackageRoot, path)));
     default:
       return undefined;
   }
