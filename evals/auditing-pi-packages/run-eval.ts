@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -242,31 +243,56 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
-  let stdout = "";
+  const events: any[] = [];
+  const traceLines: string[] = [];
+  let traceBytes = 0;
+  let traceTruncated = false;
+  let malformedEventLines = 0;
+  let eventLimitExceeded = false;
   let stderr = "";
-  let outputOverflow = false;
-  let timedOut = false;
-  let termination: Promise<void> | undefined;
-  const maxCapturedBytes = 2 * 1024 * 1024;
-  child.stdout!.setEncoding("utf8");
+  const maxTraceBytes = 200_000;
+  const maxStderrBytes = 4_000;
+  const maxEvents = 1_000;
+  const compactMessage = (message: any) => ({
+    role: message?.role,
+    responseId: message?.responseId,
+    stopReason: message?.stopReason,
+    content: message?.role === "assistant" && Array.isArray(message.content)
+      ? message.content.filter((part: any) => part?.type === "text").map((part: any) => ({ type: "text", text: String(part.text ?? "") }))
+      : [],
+  });
+  const compactEvent = (event: any): any | undefined => {
+    switch (event?.type) {
+      case "session": return { type: event.type, version: event.version };
+      case "agent_start": case "turn_start": case "agent_settled": return { type: event.type };
+      case "message_start": case "message_end": return { type: event.type, message: compactMessage(event.message) };
+      case "tool_execution_start": return { type: event.type, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args };
+      case "tool_execution_end": return { type: event.type, toolCallId: event.toolCallId, isError: Boolean(event.isError) };
+      case "turn_end": return { type: event.type, message: compactMessage(event.message) };
+      case "agent_end": return { type: event.type, messages: Array.isArray(event.messages) ? event.messages.map(compactMessage) : event.messages };
+      default: return undefined; // Streaming updates duplicate large provider payloads and are not lifecycle evidence.
+    }
+  };
+  const output = createInterface({ input: child.stdout!, crlfDelay: Infinity });
+  output.on("line", (line) => {
+    let event: any;
+    try { event = JSON.parse(line); } catch { malformedEventLines += 1; return; }
+    const compact = compactEvent(event);
+    if (!compact) return;
+    if (events.length >= maxEvents) { eventLimitExceeded = true; return; }
+    events.push(compact);
+    const trace = `${JSON.stringify(compact)}\n`;
+    if (traceBytes + Buffer.byteLength(trace) <= maxTraceBytes) { traceLines.push(trace); traceBytes += Buffer.byteLength(trace); }
+    else traceTruncated = true;
+  });
   child.stderr!.setEncoding("utf8");
-  child.stdout!.on("data", (chunk) => {
-    if (stdout.length + chunk.length > maxCapturedBytes) { outputOverflow = true; termination ??= terminate(child); return; }
-    stdout += chunk;
-  });
-  child.stderr!.on("data", (chunk) => {
-    if (stderr.length + chunk.length > maxCapturedBytes) { outputOverflow = true; termination ??= terminate(child); return; }
-    stderr += chunk;
-  });
+  child.stderr!.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-maxStderrBytes); });
   const timeout = setTimeout(() => { timedOut = true; termination = terminate(child); }, config.timeoutMs);
   const exitCode = await new Promise<number | null>((resolveExit) => child.on("close", resolveExit));
   clearTimeout(timeout);
   if (termination) await termination;
+  if (!output.closed) await new Promise<void>((resolveOutput) => output.once("close", resolveOutput));
 
-  let malformedEventLines = 0;
-  const events = stdout.split(/\r?\n/).filter(Boolean).flatMap((line) => {
-    try { return [JSON.parse(line)]; } catch { malformedEventLines += 1; return []; }
-  });
   const failedToolCallIds = new Set(events
     .filter((event: any) => event.type === "tool_execution_end" && event.isError)
     .map((event: any) => event.toolCallId));
@@ -275,17 +301,19 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const assistantEnds = events.filter((event: any) => event.type === "message_end" && event.message?.role === "assistant");
   const finalAssistant = assistantEnds.at(-1)?.message;
   const answer = assistantText(finalAssistant);
-  const streamValid = malformedEventLines === 0 && finalAssistant?.stopReason === "stop" && validateEventLifecycle(events);
+  const streamValid = !eventLimitExceeded && malformedEventLines === 0 && finalAssistant?.stopReason === "stop" && validateEventLifecycle(events);
   const usage = assistantEnds.at(-1)?.message?.usage ?? {};
   const after = await snapshot(workspace);
   const changes = changedPaths(before, after);
-  const skillMarker = skillPath.replaceAll("\\", "/");
-  const skillLoaded = condition === "forced" || toolCalls.some((call: any) => {
-    if (call.name !== "read") return false;
-    const args = JSON.stringify(call.args).replaceAll("\\", "/");
-    return args.includes(skillMarker) || args.includes(`/${config.skillName}/SKILL.md`);
+  const isInstalledReferenceRead = (call: (typeof toolCalls)[number]) => call.name === "read" && config.requiredLocalReferencePaths.some((path) => {
+    const requestedPath = (call.args && typeof call.args === "object" && typeof (call.args as { path?: unknown }).path === "string") ? (call.args as { path: string }).path : undefined;
+    return requestedPath !== undefined && resolve(consumerCwd, requestedPath) === join(installedPackageRoot, path);
   });
-  const context: CheckContext = { answer, guidance: "", changedPaths: changes, toolCalls, toolErrors, condition, skillLoaded, auditRoot: consumerCwd, consumerCwd, installedPackageRoot };
+  const expectedToolErrors = testCase.local_reference_mode === "unavailable" ? toolCalls.filter((call) => call.failed && isInstalledReferenceRead(call)).length : 0;
+  const unexpectedToolErrors = toolErrors - expectedToolErrors;
+  // --skill registers the supplied skill in Pi's initial skill context; it need not read SKILL.md again.
+  const skillLoaded = condition !== "baseline";
+  const context: CheckContext = { answer, guidance: "", changedPaths: changes, toolCalls, toolErrors: unexpectedToolErrors, condition, skillLoaded, auditRoot: consumerCwd, consumerCwd, installedPackageRoot };
 
   const evaluate = (checkId: string): boolean | null => {
     if (checkId === "skill_loaded") return condition === "baseline" ? null : skillLoaded;
@@ -294,7 +322,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     if (checkId === "no_files_changed") return changes.length === 0;
     if (checkId === "some_file_changed") return changes.length > 0;
     if (checkId === "bounded_tool_calls") return toolCalls.length <= config.maxToolCalls;
-    if (checkId === "no_tool_errors") return toolErrors === 0;
+    if (checkId === "no_tool_errors") return unexpectedToolErrors === 0;
     const custom = evaluateCustomCheck(checkId, context);
     if (custom === undefined) throw new Error(`Unknown check id: ${checkId}`);
     return custom;
@@ -307,9 +335,9 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     trial,
     shouldTrigger: testCase.should_trigger,
     promptKind: testCase.prompt_kind,
-    passed: exitCode === 0 && !timedOut && !outputOverflow && streamValid && values.length > 0 && values.every(Boolean),
+    passed: exitCode === 0 && !timedOut && streamValid && values.length > 0 && values.every(Boolean),
     checks,
-    observations: { skillLoaded, toolErrors, timedOut, outputOverflow, streamValid, malformedEventLines, stopReason: finalAssistant?.stopReason },
+    observations: { skillLoaded, toolErrors, expectedToolErrors, unexpectedToolErrors, timedOut, eventLimitExceeded, traceTruncated, streamValid, malformedEventLines, stopReason: finalAssistant?.stopReason },
     metrics: {
       durationMs: Date.now() - started,
       toolCalls: toolCalls.length,
@@ -317,8 +345,8 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
       exitCode,
       usage: { input: usage.input ?? 0, output: usage.output ?? 0, totalTokens: usage.totalTokens ?? 0, cost: usage.cost?.total ?? 0 },
     },
-    ...(options.includeRaw ? { answer: answer.slice(0, 20_000), stderr: stderr.slice(-4_000) } : {}),
-    ...(options.includeEvents ? { eventTraceJsonl: stdout.slice(0, 200_000) } : {}),
+    ...(options.includeRaw ? { answer: answer.slice(0, 20_000), stderr } : {}),
+    ...(options.includeEvents ? { eventTraceJsonl: traceLines.join("") } : {}),
     workspace: options.keep ? workspace : undefined,
   };
   return result;

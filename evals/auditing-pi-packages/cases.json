@@ -8,6 +8,7 @@
     "local_reference_mode": "available",
     "expected_checks": [
       "skill_loaded",
+      "no_cwd_reference_fallback",
       "required_local_audit_references_loaded",
       "requested_scope_acknowledged",
       "no_sibling_package_read",
@@ -25,6 +26,7 @@
     "local_reference_mode": "available",
     "expected_checks": [
       "skill_loaded",
+      "no_cwd_reference_fallback",
       "requested_scope_acknowledged",
       "no_sibling_package_read",
       "no_files_changed",
@@ -41,6 +43,7 @@
     "local_reference_mode": "unavailable",
     "expected_checks": [
       "skill_loaded",
+      "no_cwd_reference_fallback",
       "unavailable_local_reference_qualified",
       "no_files_changed",
       "bounded_tool_calls"
@@ -55,6 +58,7 @@
     "local_reference_mode": "unavailable",
     "expected_checks": [
       "skill_not_loaded",
+      "no_cwd_reference_fallback",
       "no_sibling_package_read",
       "no_files_changed",
       "answer_not_empty",

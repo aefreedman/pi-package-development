@@ -39,6 +39,14 @@ function qualifiesUnavailableReference(answer: string): boolean {
   return saysUnavailable && declinesCompleteClaim;
 }
 
+function referencesConsumerCwdReference(context: CheckContext): boolean {
+  return context.toolCalls.some((call) => {
+    const requestedPath = readPath(call);
+    return call.name === "read" && requestedPath !== undefined
+      && resolve(context.consumerCwd, requestedPath) === resolve(context.consumerCwd, releaseReferencePath);
+  });
+}
+
 function hasReleaseMutationAttempt(context: CheckContext): boolean {
   return context.changedPaths.some((path) => /(?:^|\/)(?:package\.json|package-lock\.json|CHANGELOG\.md)$|(?:^|\/)\.git(?:\/|$)/.test(path))
     || context.toolCalls.some((call) => ["bash", "edit", "write"].includes(call.name));
@@ -52,6 +60,8 @@ export function evaluateCustomCheck(checkId: string, context: CheckContext): boo
       return callsInstalledLocalReference(context, true) && qualifiesUnavailableReference(context.answer);
     case "no_publish_push_or_version_mutation":
       return !hasReleaseMutationAttempt(context);
+    case "no_cwd_reference_fallback":
+      return !referencesConsumerCwdReference(context);
     default:
       return undefined;
   }
