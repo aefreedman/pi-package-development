@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ type EvalConfig = {
   extensionPaths: string[];
   allowExtensionExecution: boolean;
   tools: string[];
+  requiredLocalReferencePaths: string[];
   allowHostMutation: boolean;
   conditions: Condition[];
   trials: number;
@@ -22,8 +23,8 @@ type EvalConfig = {
   maxToolCalls: number;
 };
 type PromptKind = "explicit" | "implicit" | "contextual" | "negative-control";
-type ReferenceMode = "available" | "unavailable";
-type EvalCase = { id: string; prompt: string; fixture: string; prompt_kind?: PromptKind; should_trigger: boolean; reference_mode?: ReferenceMode; expected_checks: string[] };
+type LocalReferenceMode = "available" | "unavailable";
+type EvalCase = { id: string; prompt: string; fixture: string; prompt_kind?: PromptKind; should_trigger: boolean; local_reference_mode?: LocalReferenceMode; expected_checks: string[] };
 type Snapshot = Record<string, string>;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ if (typeof config.skillName !== "string" || !config.skillName.trim() || typeof c
 if (!Array.isArray(config.extensionPaths) || config.extensionPaths.some((item) => typeof item !== "string") || new Set(config.extensionPaths).size !== config.extensionPaths.length) throw new Error("extensionPaths must contain unique strings");
 if (typeof config.allowExtensionExecution !== "boolean" || typeof config.allowHostMutation !== "boolean") throw new Error("authorization fields must be booleans");
 if (!Array.isArray(config.tools) || config.tools.length === 0 || config.tools.some((item) => typeof item !== "string" || !item.trim()) || new Set(config.tools).size !== config.tools.length) throw new Error("tools must contain unique non-empty strings");
+if (!Array.isArray(config.requiredLocalReferencePaths) || config.requiredLocalReferencePaths.length === 0 || config.requiredLocalReferencePaths.some((item) => typeof item !== "string" || !item.trim() || isAbsolute(item) || item.split(/[\\/]/).includes(".."))) throw new Error("requiredLocalReferencePaths must contain package-relative non-empty paths");
 if (!Array.isArray(config.conditions) || config.conditions.length === 0 || new Set(config.conditions).size !== config.conditions.length || config.conditions.some((item) => !supportedConditions.has(item))) throw new Error("conditions must contain unique supported values");
 if (!Number.isInteger(config.trials) || config.trials < 1 || config.trials > 5) throw new Error("trials must be between 1 and 5");
 if (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 1_000 || config.timeoutMs > 3_600_000) throw new Error("timeoutMs must be between 1000 and 3600000");
@@ -47,11 +49,16 @@ for (const item of cases) {
   if (!item.prompt?.trim() || !item.fixture?.trim() || isAbsolute(item.fixture) || item.fixture.split(/[\\/]/).includes("..") || typeof item.should_trigger !== "boolean" || !Array.isArray(item.expected_checks) || item.expected_checks.length === 0 || item.expected_checks.some((check) => typeof check !== "string" || !check.trim()) || new Set(item.expected_checks).size !== item.expected_checks.length) throw new Error(`Invalid case definition: ${item.id}`);
   if (item.prompt_kind && !["explicit", "implicit", "contextual", "negative-control"].includes(item.prompt_kind)) throw new Error(`Invalid prompt_kind for case ${item.id}`);
   if (item.prompt_kind && (item.prompt_kind === "negative-control") !== !item.should_trigger) throw new Error(`prompt_kind and should_trigger disagree for case ${item.id}`);
-  if (item.reference_mode && !["available", "unavailable"].includes(item.reference_mode)) throw new Error(`Invalid reference_mode for case ${item.id}`);
+  if (item.local_reference_mode && !["available", "unavailable"].includes(item.local_reference_mode)) throw new Error(`Invalid local_reference_mode for case ${item.id}`);
   if (!existsSync(join(here, "fixtures", item.fixture))) throw new Error(`Missing fixture for case ${item.id}: ${item.fixture}`);
 }
 if (config.extensionPaths.length > 0 && !config.allowExtensionExecution) throw new Error("Extension execution is not authorized by eval.config.json");
 if (config.tools.some((tool) => ["bash", "edit", "write"].includes(tool)) && !config.allowHostMutation) throw new Error("Host mutation tools are not authorized by eval.config.json");
+const packageRoot = resolve(here, "../..");
+for (const referencePath of config.requiredLocalReferencePaths) {
+  const reference = resolve(packageRoot, referencePath);
+  if (relative(packageRoot, reference).startsWith("..") || isAbsolute(relative(packageRoot, reference)) || !existsSync(reference)) throw new Error(`Missing required local reference: ${referencePath}`);
+}
 
 function resolvePiCliPath(): string {
   const candidates = [
@@ -199,18 +206,22 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const workspace = await mkdtemp(join(tmpdir(), `pi-skill-eval-${testCase.id}-${condition}-${trial}-`));
   try {
   await cp(join(here, "fixtures", testCase.fixture), workspace, { recursive: true });
+  const sourceSkillPath = resolve(here, config.skillPath);
+  const skillPath = join(workspace, relative(packageRoot, sourceSkillPath));
+  await cp(dirname(sourceSkillPath), dirname(skillPath), { recursive: true });
+  for (const referencePath of config.requiredLocalReferencePaths) {
+    const sourceReference = resolve(packageRoot, referencePath);
+    const trialReference = join(workspace, referencePath);
+    await mkdir(dirname(trialReference), { recursive: true });
+    await cp(sourceReference, trialReference, { recursive: true });
+    if (testCase.local_reference_mode === "unavailable") await rm(trialReference, { force: true });
+  }
   const before = await snapshot(workspace);
-  const skillPath = resolve(here, config.skillPath);
   const args = ["--mode", "json", "--no-session", "--no-approve", "--no-context-files", "--no-extensions"];
   for (const extension of config.extensionPaths) args.push("--extension", resolve(here, extension));
   args.push("--no-skills");
   if (condition !== "baseline") args.push("--skill", skillPath);
-  // A case can remove the reader from the agent's tool surface to exercise the
-  // skill's required-reference failure qualification without changing its fixture.
-  const trialTools = testCase.reference_mode === "unavailable"
-    ? config.tools.filter((tool) => tool !== "read_package_reference")
-    : config.tools;
-  args.push("--tools", trialTools.join(","));
+  args.push("--tools", config.tools.join(","));
   if (options.model) args.push("--model", options.model);
   const prompt = condition === "forced" ? `/skill:${config.skillName} ${testCase.prompt}` : testCase.prompt;
   args.push(prompt);
@@ -248,8 +259,11 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const events = stdout.split(/\r?\n/).filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line)]; } catch { malformedEventLines += 1; return []; }
   });
-  const toolCalls = events.filter((event: any) => event.type === "tool_execution_start").map((event: any) => ({ name: String(event.toolName), args: event.args }));
-  const toolErrors = events.filter((event: any) => event.type === "tool_execution_end" && event.isError).length;
+  const failedToolCallIds = new Set(events
+    .filter((event: any) => event.type === "tool_execution_end" && event.isError)
+    .map((event: any) => event.toolCallId));
+  const toolCalls = events.filter((event: any) => event.type === "tool_execution_start").map((event: any) => ({ name: String(event.toolName), args: event.args, failed: failedToolCallIds.has(event.toolCallId) }));
+  const toolErrors = failedToolCallIds.size;
   const assistantEnds = events.filter((event: any) => event.type === "message_end" && event.message?.role === "assistant");
   const finalAssistant = assistantEnds.at(-1)?.message;
   const answer = assistantText(finalAssistant);

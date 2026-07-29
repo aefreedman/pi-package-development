@@ -4,16 +4,16 @@ This package-owned, opt-in suite checks release-preparation guidance. It is sepa
 
 ## Covered behavior
 
-- The release skill loads its required release-readiness reference when the reader is available.
-- An unavailable reader is explicitly qualified rather than treated as a policy-complete readiness result.
+- The release skill natively reads its required package-local release-readiness reference through `read`, without `read_package_reference`.
+- A genuinely failed required local read is explicitly qualified rather than treated as a policy-complete readiness result.
 - Release preparation performs no publish, push, or version mutation; deterministic snapshots and the no-mutation tool allowlist enforce that boundary.
 - An unrelated README request is a negative trigger control.
 
 ## Isolation and safety
 
-Each trial starts from a fresh synthetic fixture copy, declines context files and approval, disables unrelated skills, closes stdin, and exposes only `read` plus the reviewed `read_package_reference` extension tool. `reference_mode: "unavailable"` removes the reader from the trial tool surface. No shell, edit, or write tools are enabled. A temporary copy is not an OS sandbox; use trusted fixtures locally and an OS container/VM for untrusted or unattended runs.
+Each trial starts from a fresh copy of the synthetic fixture, target skill, and package-local reference, declines context files and approval, disables unrelated skills, closes stdin, and exposes only native `read`. `local_reference_mode: "unavailable"` removes the copied required reference while retaining `read`, so qualification requires an attempted local read that actually fails. No extensions, shell, edit, or write tools are enabled. A temporary copy is not an OS sandbox; use trusted fixtures locally and an OS container/VM for untrusted or unattended runs.
 
-The owner and reader extensions are enabled only to make required-reference loading observable. Raw answers and event traces are opt-in diagnostics and must not be committed.
+Raw answers and event traces are opt-in diagnostics and must not be committed.
 
 ## Run deliberately
 

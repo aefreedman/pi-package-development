@@ -2,17 +2,24 @@ export type CheckContext = {
   answer: string;
   guidance: string;
   changedPaths: string[];
-  toolCalls: Array<{ name: string; args: unknown }>;
+  toolCalls: Array<{ name: string; args: unknown; failed: boolean }>;
   toolErrors: number;
   condition: "available" | "baseline" | "forced";
   skillLoaded: boolean;
   auditRoot: string;
 };
 
-function callsReleaseReference(context: CheckContext): boolean {
+function callsLocalReleaseReference(context: CheckContext): boolean {
   return context.toolCalls.some((call) =>
-    call.name === "read_package_reference"
-    && JSON.stringify(call.args).includes("@aefree/pi-package-development")
+    call.name === "read"
+    && JSON.stringify(call.args).replaceAll("\\", "/").includes("references/package-development/release-readiness.md"),
+  );
+}
+
+function failedLocalReleaseReferenceRead(context: CheckContext): boolean {
+  return context.toolCalls.some((call) =>
+    call.failed
+    && call.name === "read"
     && JSON.stringify(call.args).replaceAll("\\", "/").includes("references/package-development/release-readiness.md"),
   );
 }
@@ -30,10 +37,10 @@ function hasReleaseMutationAttempt(context: CheckContext): boolean {
 
 export function evaluateCustomCheck(checkId: string, context: CheckContext): boolean | undefined {
   switch (checkId) {
-    case "required_release_reference_loaded":
-      return callsReleaseReference(context);
-    case "unavailable_reference_qualified":
-      return qualifiesUnavailableReference(context.answer);
+    case "required_local_release_reference_loaded":
+      return callsLocalReleaseReference(context);
+    case "unavailable_local_reference_qualified":
+      return failedLocalReleaseReferenceRead(context) && qualifiesUnavailableReference(context.answer);
     case "no_publish_push_or_version_mutation":
       return !hasReleaseMutationAttempt(context);
     default:

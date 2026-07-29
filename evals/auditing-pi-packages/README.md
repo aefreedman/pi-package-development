@@ -4,16 +4,16 @@ This package-owned, opt-in suite checks the audit skill and its adjacent `/packa
 
 ## Covered behavior
 
-- The audit skill loads all three required package references when the reader is available.
-- An unavailable reader must be qualified before a policy- or convention-complete claim.
+- The audit skill natively reads all three required package-local references through `read`, without `read_package_reference`.
+- A genuinely failed required local read must be qualified before a policy- or convention-complete claim.
 - An explicitly named package path is acknowledged without reading the synthetic sibling package.
 - The adjacent `/package-status` request is a negative trigger control for the audit skill and must not read the sibling package.
 
 ## Isolation and safety
 
-Each trial copies a synthetic fixture into a fresh temporary directory, declines context files and project approval, disables all skills except the target one, closes stdin, and permits only `read` plus the reviewed `read_package_reference` extension tool. Cases marked `reference_mode: "unavailable"` remove that reader from the trial's tool surface. No shell or mutation tools are enabled. The temporary copy is not an OS sandbox; run only trusted fixtures locally and use OS isolation for unattended work.
+Each trial copies a synthetic fixture, the target skill, and its package-local references into a fresh temporary directory, declines context files and project approval, disables all skills except the copied target skill, closes stdin, and permits only native `read`. Cases marked `local_reference_mode: "unavailable"` remove the copied required references while retaining `read`, so qualification is accepted only when an attempted local read actually fails. No extensions, shell, or mutation tools are enabled. The temporary copy is not an OS sandbox; run only trusted fixtures locally and use OS isolation for unattended work.
 
-The owner and reference-reader extensions are enabled only because reference loading is the behavior under test. Raw answers and event traces remain opt-in runner flags and must not be committed.
+Raw answers and event traces remain opt-in runner flags and must not be committed.
 
 ## Run deliberately
 

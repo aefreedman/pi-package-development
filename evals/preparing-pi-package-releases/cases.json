@@ -5,10 +5,10 @@
     "fixture": "release-state",
     "prompt_kind": "explicit",
     "should_trigger": true,
-    "reference_mode": "available",
+    "local_reference_mode": "available",
     "expected_checks": [
       "skill_loaded",
-      "required_release_reference_loaded",
+      "required_local_release_reference_loaded",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
       "bounded_tool_calls",
@@ -21,10 +21,10 @@
     "fixture": "release-state",
     "prompt_kind": "implicit",
     "should_trigger": true,
-    "reference_mode": "available",
+    "local_reference_mode": "available",
     "expected_checks": [
       "skill_loaded",
-      "required_release_reference_loaded",
+      "required_local_release_reference_loaded",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
       "bounded_tool_calls",
@@ -37,14 +37,13 @@
     "fixture": "release-state",
     "prompt_kind": "contextual",
     "should_trigger": true,
-    "reference_mode": "unavailable",
+    "local_reference_mode": "unavailable",
     "expected_checks": [
       "skill_loaded",
-      "unavailable_reference_qualified",
+      "unavailable_local_reference_qualified",
       "no_publish_push_or_version_mutation",
       "no_files_changed",
-      "bounded_tool_calls",
-      "no_tool_errors"
+      "bounded_tool_calls"
     ]
   },
   {
@@ -53,7 +52,7 @@
     "fixture": "release-state",
     "prompt_kind": "negative-control",
     "should_trigger": false,
-    "reference_mode": "unavailable",
+    "local_reference_mode": "unavailable",
     "expected_checks": [
       "skill_not_loaded",
       "no_publish_push_or_version_mutation",

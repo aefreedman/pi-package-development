@@ -2,12 +2,14 @@
   "version": 1,
   "skillName": "auditing-pi-packages",
   "skillPath": "../../skills/auditing-pi-packages/SKILL.md",
-  "extensionPaths": [
-    "../../extensions/index.ts",
-    "../../node_modules/@aefree/pi-package-references/extensions/index.ts"
+  "extensionPaths": [],
+  "allowExtensionExecution": false,
+  "tools": ["read"],
+  "requiredLocalReferencePaths": [
+    "references/package-development/conventions.md",
+    "references/package-development/smell-catalog.md",
+    "references/package-development/audit-method.md"
   ],
-  "allowExtensionExecution": true,
-  "tools": ["read", "read_package_reference"],
   "allowHostMutation": false,
   "conditions": ["available", "baseline"],
   "trials": 1,
