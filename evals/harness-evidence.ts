@@ -95,7 +95,7 @@ export function hasDirectlyNegatedQualification(answer: string, subject: "policy
   const concept = subject === "policy"
     ? "(?:policy|convention)[ -]?(?:complete|completeness)"
     : "(?:release[- ]?(?:ready|readiness)|ready for release)";
-  const negated = new RegExp(`\\b(?:cannot|can't|unable to|will not|do not|don't)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\bnot\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)?\\s*not\\s+(?:confirmed|established|complete|demonstrated|claimed)\\b`, "i");
+  const negated = new RegExp(`\\b(?:cannot|can't|unable to|will not|do not|don't)\\s+(?:[\\w-]+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:[\\w-]+\\s+){0,8}${concept}\\b|\\bnot\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)?\\s*not\\s+(?:confirmed|established|complete|demonstrated|claimed)\\b`, "i");
   const affirmative = new RegExp(`\\b(?:can|may|will)\\s+(?:\\w+\\s+){0,5}(?:claim|provide|give|make|confirm|conclude|state|assert)\\s+(?:\\w+\\s+){0,8}${concept}\\b|\\b(?:it|this|the)\\s+(?:audit|assessment|package|release)?\\s*(?:is|are|was|were|remains|appears)\\s+(?:an?\\s+)?${concept}\\b|\\b${concept}\\b\\s+(?:is|are|was|were|remains)\\s+(?:confirmed|established|complete|demonstrated)\\b`, "i");
   return negated.test(answer) && !affirmative.test(answer);
 }

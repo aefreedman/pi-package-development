@@ -45,6 +45,7 @@ test("available negative controls pass only without skill-specific reference beh
 test("unavailable-reference qualification requires a direct negated conclusion", () => {
   const exactMissing = { name: "read", args: { path: releaseReference }, failed: true, errorCause: missingReadResult(releaseReference) };
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable, so I cannot confirm release readiness." }), true);
+  assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable. Therefore, I cannot claim a policy-complete release assessment or release readiness." }), true);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable; release readiness is not confirmed, but the package is release-ready." }), false);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", { ...context([exactMissing]), answer: "The required reference is unavailable, so I cannot confirm release readiness, but the package is ready for release." }), false);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, errorCause: "EACCES: permission denied" }])), false);
