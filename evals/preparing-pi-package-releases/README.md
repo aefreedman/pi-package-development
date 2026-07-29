@@ -11,7 +11,7 @@ This package-owned, opt-in suite checks release-preparation guidance. It is sepa
 
 ## Isolation and safety
 
-Each trial starts from a fresh copy of the synthetic fixture, target skill, and package-local reference, declines context files and approval, disables unrelated skills, closes stdin, and exposes only native `read`. `local_reference_mode: "unavailable"` removes the copied required reference while retaining `read`, so qualification requires an attempted local read that actually fails. No extensions, shell, edit, or write tools are enabled. A temporary copy is not an OS sandbox; use trusted fixtures locally and an OS container/VM for untrusted or unattended runs.
+Each trial uses separate `consumer/` and `installed-package/` directories in a fresh temporary directory. The synthetic fixture is staged only in `consumer/`; the target skill and its package-local reference are staged only in `installed-package/`, preserving their package-relative layout. Pi starts from `consumer/`; runner preflight rejects any required reference there, and local-reference checks accept only a `read` that resolves to the staged installed-package file. `local_reference_mode: "unavailable"` removes that staged required file while retaining `read`, so qualification requires an attempted installed-package read that actually fails. Context files and approval are declined, unrelated skills are disabled, stdin is closed, and only native `read` is exposed. No extensions, shell, edit, or write tools are enabled. A temporary copy is not an OS sandbox; use trusted fixtures locally and an OS container/VM for untrusted or unattended runs.
 
 Raw answers and event traces are opt-in diagnostics and must not be committed.
 

@@ -205,16 +205,24 @@ async function terminate(child: ReturnType<typeof spawn>): Promise<void> {
 async function runTrial(testCase: EvalCase, condition: Condition, trial: number, options: ReturnType<typeof parseArgs>) {
   const workspace = await mkdtemp(join(tmpdir(), `pi-skill-eval-${testCase.id}-${condition}-${trial}-`));
   try {
-  await cp(join(here, "fixtures", testCase.fixture), workspace, { recursive: true });
+  const consumerCwd = join(workspace, "consumer");
+  const installedPackageRoot = join(workspace, "installed-package");
+  await cp(join(here, "fixtures", testCase.fixture), consumerCwd, { recursive: true });
   const sourceSkillPath = resolve(here, config.skillPath);
-  const skillPath = join(workspace, relative(packageRoot, sourceSkillPath));
+  const sourceSkillRelativePath = relative(packageRoot, sourceSkillPath);
+  if (sourceSkillRelativePath.startsWith("..") || isAbsolute(sourceSkillRelativePath)) throw new Error(`Skill must be package-local: ${config.skillPath}`);
+  const skillPath = join(installedPackageRoot, sourceSkillRelativePath);
   await cp(dirname(sourceSkillPath), dirname(skillPath), { recursive: true });
   for (const referencePath of config.requiredLocalReferencePaths) {
     const sourceReference = resolve(packageRoot, referencePath);
-    const trialReference = join(workspace, referencePath);
+    const trialReference = join(installedPackageRoot, referencePath);
+    const consumerReference = join(consumerCwd, referencePath);
+    if (relative(installedPackageRoot, trialReference).startsWith("..") || isAbsolute(relative(installedPackageRoot, trialReference))) throw new Error(`Staged reference escapes installed package: ${referencePath}`);
     await mkdir(dirname(trialReference), { recursive: true });
     await cp(sourceReference, trialReference, { recursive: true });
     if (testCase.local_reference_mode === "unavailable") await rm(trialReference, { force: true });
+    if (existsSync(consumerReference)) throw new Error(`Consumer CWD must not contain a package-local reference: ${referencePath}`);
+    if (existsSync(trialReference) === (testCase.local_reference_mode === "unavailable")) throw new Error(`Invalid staged local reference mode for: ${referencePath}`);
   }
   const before = await snapshot(workspace);
   const args = ["--mode", "json", "--no-session", "--no-approve", "--no-context-files", "--no-extensions"];
@@ -228,7 +236,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
 
   const started = Date.now();
   const child = spawn(process.execPath, [resolvePiCliPath(), ...args], {
-    cwd: workspace,
+    cwd: consumerCwd,
     windowsHide: true,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -277,7 +285,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     const args = JSON.stringify(call.args).replaceAll("\\", "/");
     return args.includes(skillMarker) || args.includes(`/${config.skillName}/SKILL.md`);
   });
-  const context: CheckContext = { answer, guidance: "", changedPaths: changes, toolCalls, toolErrors, condition, skillLoaded, auditRoot: workspace };
+  const context: CheckContext = { answer, guidance: "", changedPaths: changes, toolCalls, toolErrors, condition, skillLoaded, auditRoot: consumerCwd, consumerCwd, installedPackageRoot };
 
   const evaluate = (checkId: string): boolean | null => {
     if (checkId === "skill_loaded") return condition === "baseline" ? null : skillLoaded;

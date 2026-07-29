@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export type CheckContext = {
   answer: string;
   guidance: string;
@@ -7,6 +9,8 @@ export type CheckContext = {
   condition: "available" | "baseline" | "forced";
   skillLoaded: boolean;
   auditRoot: string;
+  consumerCwd: string;
+  installedPackageRoot: string;
 };
 
 const referencePaths = [
@@ -15,19 +19,22 @@ const referencePaths = [
   "references/package-development/audit-method.md",
 ];
 
-function callsLocalReference(context: CheckContext, path: string): boolean {
-  return context.toolCalls.some((call) =>
-    call.name === "read"
-    && JSON.stringify(call.args).replaceAll("\\", "/").includes(path),
-  );
+function readPath(call: CheckContext["toolCalls"][number]): string | undefined {
+  if (!call.args || typeof call.args !== "object") return undefined;
+  const path = (call.args as { path?: unknown }).path;
+  return typeof path === "string" ? path : undefined;
 }
 
-function failedLocalReferenceRead(context: CheckContext): boolean {
-  return referencePaths.some((path) => context.toolCalls.some((call) =>
-    call.failed
-    && call.name === "read"
-    && JSON.stringify(call.args).replaceAll("\\", "/").includes(path),
-  ));
+function callsInstalledLocalReference(context: CheckContext, path: string, failed: boolean): boolean {
+  const stagedReference = resolve(context.installedPackageRoot, path);
+  return context.toolCalls.some((call) =>
+    call.name === "read"
+    && call.failed === failed
+    && (() => {
+      const requestedPath = readPath(call);
+      return requestedPath !== undefined && resolve(context.consumerCwd, requestedPath) === stagedReference;
+    })(),
+  );
 }
 
 function referencesSibling(context: CheckContext): boolean {
@@ -43,9 +50,9 @@ function qualifiesUnavailableReference(answer: string): boolean {
 export function evaluateCustomCheck(checkId: string, context: CheckContext): boolean | undefined {
   switch (checkId) {
     case "required_local_audit_references_loaded":
-      return referencePaths.every((path) => callsLocalReference(context, path));
+      return referencePaths.every((path) => callsInstalledLocalReference(context, path, false));
     case "unavailable_local_reference_qualified":
-      return failedLocalReferenceRead(context) && qualifiesUnavailableReference(context.answer);
+      return referencePaths.some((path) => callsInstalledLocalReference(context, path, true)) && qualifiesUnavailableReference(context.answer);
     case "requested_scope_acknowledged":
       return /(?:^|[\s`])\.?\/?target-package(?:[\s`/.,:]|$)/i.test(context.answer);
     case "no_sibling_package_read":
