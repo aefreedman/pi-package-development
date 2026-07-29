@@ -48,7 +48,7 @@ function referencesConsumerCwdReference(context: CheckContext): boolean {
 
 function qualifiesUnavailableReference(answer: string): boolean {
   const saysUnavailable = /(?:required\s+reference|reference)[\s\S]{0,120}(?:unavailable|not available|could not|unable)|(?:unavailable|not available|could not|unable)[\s\S]{0,120}(?:required\s+reference|reference)/i.test(answer);
-  const declinesCompleteClaim = /(?:cannot|can't|do not|don't|unable to|not)\s+(?:claim|provide|give|make)[\s\S]{0,120}(?:policy|convention)[ -]?(?:complete|completeness)|(?:policy|convention)[ -]?(?:complete|completeness)[\s\S]{0,80}(?:cannot|can't|do not|don't|not)/i.test(answer);
+  const declinesCompleteClaim = /(?:cannot|can't|do not|don't|unable to|not)\s+(?:claim|provide|give|make)[\s\S]{0,120}(?:policy|convention)[ -]?(?:complete|completeness)|(?:policy|convention)[ -]?(?:complete|completeness)[\s\S]{0,80}(?:cannot|can't|do not|don't|not)|not\s+claimed\s+as\s+(?:an?\s+)?(?:policy|convention)[ -]?(?:complete|completeness)[\s\S]{0,80}audit/i.test(answer);
   return saysUnavailable && declinesCompleteClaim;
 }
 

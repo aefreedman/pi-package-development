@@ -32,12 +32,27 @@ test("available negative controls pass only without skill-specific reference beh
   assert.equal(release.evaluateCustomCheck("no_skill_specific_reference_behavior", context([{ name: "read", args: { path: releaseReference }, failed: true, errorCause: "ENOENT" }])), false);
 });
 
-test("unavailable reference qualification accepts exact-path missing-file failures only", () => {
+test("unavailable reference qualification accepts exact-path missing-file failures and the observed audit wording", () => {
   const exactMissing = { name: "read", args: { path: releaseReference }, failed: true, errorCause: "ENOENT: no such file" };
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([exactMissing])), true);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, errorCause: "EACCES: permission denied" }])), false);
   assert.equal(release.evaluateCustomCheck("unavailable_reference_qualified", context([{ ...exactMissing, args: { path: "references/package-development/release-readiness.md" } }])), false);
+  const auditMissing = { name: "read", args: { path: auditReference }, failed: true, errorCause: "ENOENT: no such file" };
+  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "The required reference is unavailable; this is not claimed as a policy-complete package audit." }), true);
+  assert.equal(audit.evaluateCustomCheck("unavailable_reference_qualified", { ...context([auditMissing]), answer: "This is not claimed as a policy-complete package audit." }), false);
   assert.equal(audit.evaluateCustomCheck("no_cwd_reference_fallback", context([{ name: "read", args: { path: "references/package-development/conventions.md" }, failed: true }])), false);
+});
+
+test("read-only optional ENOENT probes are bounded to the declared consumer target", () => {
+  const consumerCwd = resolve("/work/consumer");
+  const targetRoot = resolve(consumerCwd, "target-package");
+  const roots = [{ consumerCwd, targetRoot }];
+  const optionalProbe = { name: "read", args: { path: "./target-package/optional.md" }, failed: true, errorCause: "ENOENT: no such file" };
+  assert.equal(evidence.countUnexpectedToolErrors([optionalProbe], [], roots), 0);
+  assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, errorCause: "EACCES: permission denied" }], [], roots), 1);
+  assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "./sibling-package/optional.md" } }], [], roots), 1);
+  assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "references/package-development/conventions.md" } }], [], roots), 1);
+  assert.equal(evidence.countUnexpectedToolErrors([{ ...optionalProbe, args: { path: "./target-package/../sibling-package/optional.md" } }], [], roots), 1);
 });
 
 test("unavailable-reference allowance rejects an unrelated tool error", () => {
@@ -84,6 +99,8 @@ test("runners do not fake forced slash invocation", async () => {
     const source = await (await import("node:fs/promises")).readFile(new URL(path, import.meta.url), "utf8");
     assert.match(source, /createTerminationController/);
     assert.match(source, /child\.once\("close", resolveExit\)/);
+    assert.match(source, /consumer_target_path/);
+    assert.match(source, /targetRoot: consumerTargetRoot/);
     assert.doesNotMatch(source, /\/skill:\$\{/);
   }
 });

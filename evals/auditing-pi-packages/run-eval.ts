@@ -26,7 +26,7 @@ type EvalConfig = {
 };
 type PromptKind = "explicit" | "implicit" | "contextual" | "negative-control";
 type LocalReferenceMode = "available" | "unavailable";
-type EvalCase = { id: string; prompt: string; fixture: string; prompt_kind?: PromptKind; should_trigger: boolean; local_reference_mode?: LocalReferenceMode; expected_checks: string[] };
+type EvalCase = { id: string; prompt: string; fixture: string; consumer_target_path: string; prompt_kind?: PromptKind; should_trigger: boolean; local_reference_mode?: LocalReferenceMode; expected_checks: string[] };
 type Snapshot = Record<string, string>;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +48,7 @@ const caseIds = new Set<string>();
 for (const item of cases) {
   if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(item.id) || caseIds.has(item.id)) throw new Error(`Invalid or duplicate case id: ${String(item.id)}`);
   caseIds.add(item.id);
-  if (!item.prompt?.trim() || !item.fixture?.trim() || isAbsolute(item.fixture) || item.fixture.split(/[\\/]/).includes("..") || typeof item.should_trigger !== "boolean" || !Array.isArray(item.expected_checks) || item.expected_checks.length === 0 || item.expected_checks.some((check) => typeof check !== "string" || !check.trim()) || new Set(item.expected_checks).size !== item.expected_checks.length) throw new Error(`Invalid case definition: ${item.id}`);
+  if (!item.prompt?.trim() || !item.fixture?.trim() || isAbsolute(item.fixture) || item.fixture.split(/[\\/]/).includes("..") || !item.consumer_target_path?.trim() || isAbsolute(item.consumer_target_path) || item.consumer_target_path.split(/[\\/]/).includes("..") || typeof item.should_trigger !== "boolean" || !Array.isArray(item.expected_checks) || item.expected_checks.length === 0 || item.expected_checks.some((check) => typeof check !== "string" || !check.trim()) || new Set(item.expected_checks).size !== item.expected_checks.length) throw new Error(`Invalid case definition: ${item.id}`);
   if (item.prompt_kind && !["explicit", "implicit", "contextual", "negative-control"].includes(item.prompt_kind)) throw new Error(`Invalid prompt_kind for case ${item.id}`);
   if (item.prompt_kind && (item.prompt_kind === "negative-control") !== !item.should_trigger) throw new Error(`prompt_kind and should_trigger disagree for case ${item.id}`);
   if (item.local_reference_mode && !["available", "unavailable"].includes(item.local_reference_mode)) throw new Error(`Invalid local_reference_mode for case ${item.id}`);
@@ -226,6 +226,8 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
     if (existsSync(consumerReference)) throw new Error(`Consumer CWD must not contain a package-local reference: ${referencePath}`);
     if (existsSync(trialReference) === (testCase.local_reference_mode === "unavailable")) throw new Error(`Invalid staged local reference mode for: ${referencePath}`);
   }
+  const consumerTargetRoot = join(consumerCwd, testCase.consumer_target_path);
+  if (relative(consumerCwd, consumerTargetRoot).startsWith("..") || isAbsolute(relative(consumerCwd, consumerTargetRoot)) || !existsSync(consumerTargetRoot)) throw new Error(`Missing scoped consumer target for case ${testCase.id}: ${testCase.consumer_target_path}`);
   const before = await snapshot(workspace);
   const args = ["--mode", "json", "--no-session", "--no-approve", "--no-context-files", "--no-extensions"];
   for (const extension of config.extensionPaths) args.push("--extension", resolve(here, extension));
@@ -303,11 +305,11 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const usage = assistantEnds.at(-1)?.message?.usage ?? {};
   const after = await snapshot(workspace);
   const changes = changedPaths(before, after);
-  // Only unavailable-mode, exact installed paths, and missing-file failures are expected.
+  // Exact staged references are expected only in unavailable mode; optional target-package ENOENT probes are bounded separately.
   const allowedMissingReferencePaths = testCase.local_reference_mode === "unavailable"
     ? config.requiredLocalReferencePaths.map((path) => join(installedPackageRoot, path))
     : [];
-  const unexpectedToolErrors = countUnexpectedToolErrors(toolCalls, allowedMissingReferencePaths);
+  const unexpectedToolErrors = countUnexpectedToolErrors(toolCalls, allowedMissingReferencePaths, [{ consumerCwd, targetRoot: consumerTargetRoot }]);
   const expectedToolErrors = toolErrors - unexpectedToolErrors;
   // --skill advertises a skill to Pi. It does not prove that the model read SKILL.md or any reference.
   const skillAvailable = condition === "available";

@@ -1,3 +1,5 @@
+import { isAbsolute, relative, resolve } from "node:path";
+
 export type ObservedToolCall = {
   id: string;
   name: string;
@@ -41,14 +43,32 @@ export function isMissingFileError(cause: string | undefined): boolean {
   return Boolean(cause && /(?:\bENOENT\b|no such file|cannot find (?:the )?file|file not found)/i.test(cause));
 }
 
-/** Counts failures other than missing-file reads of explicitly allowed installed references. */
-export function countUnexpectedToolErrors(toolCalls: Pick<ObservedToolCall, "name" | "args" | "failed" | "errorCause">[], allowedMissingReferencePaths: string[]): number {
+function readPath(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const path = (args as { path?: unknown }).path;
+  return typeof path === "string" ? path : undefined;
+}
+
+function isSafePathWithinRoot(path: string, consumerCwd: string, root: string): boolean {
+  if (!path.trim() || path.includes("\0") || path.split(/[\\/]/).includes("..")) return false;
+  const resolved = resolve(consumerCwd, path);
+  const relation = relative(root, resolved);
+  return relation !== "" && !relation.startsWith("..") && !isAbsolute(relation);
+}
+
+/**
+ * Counts failures other than narrowly expected missing reads. Unavailable references must
+ * be exact staged paths; ordinary optional-file probes may be ENOENT only within a case's
+ * explicitly scoped consumer target root.
+ */
+export function countUnexpectedToolErrors(toolCalls: Pick<ObservedToolCall, "name" | "args" | "failed" | "errorCause">[], allowedMissingReferencePaths: string[], allowedMissingConsumerRoots: { consumerCwd: string; targetRoot: string }[] = []): number {
   return toolCalls.filter((call) => {
     if (!call.failed) return false;
-    const path = call.args && typeof call.args === "object" && typeof (call.args as { path?: unknown }).path === "string"
-      ? (call.args as { path: string }).path
-      : undefined;
-    return call.name !== "read" || path === undefined || !allowedMissingReferencePaths.includes(path) || !isMissingFileError(call.errorCause);
+    const path = readPath(call.args);
+    const allowedUnavailableReference = path !== undefined && allowedMissingReferencePaths.includes(path);
+    const allowedConsumerProbe = path !== undefined && allowedMissingConsumerRoots.some(({ consumerCwd, targetRoot }) => isSafePathWithinRoot(path, consumerCwd, targetRoot));
+    return call.name !== "read" || path === undefined || !isMissingFileError(call.errorCause)
+      || (!allowedUnavailableReference && !allowedConsumerProbe);
   }).length;
 }
 
