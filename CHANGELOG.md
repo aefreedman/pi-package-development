@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Exclude development-only tests and behavioral evals from published npm artifacts.
 - Add trusted-publishing, first-publication bootstrap, release-identity reconciliation, and partial-success recovery guidance to release preparation, with behavioral eval coverage.
 - Updated the Pi development baseline to 0.83.0.
 
