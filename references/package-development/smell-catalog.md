@@ -27,8 +27,8 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 ### Cross-package filesystem coupling
 
 - **Evidence:** skills, prompts, or extensions read `../sibling-package`, fixed workspace paths, or installation-layout assumptions.
-- **Failure:** independently installed packages cannot compose reliably.
-- **Remediation:** use a skill-relative reference for same-package skill content, or an explicit contract, bundled dependency, or package-qualified public reference for cross-package content.
+- **Failure:** independently installed packages cannot consume required content reliably.
+- **Remediation:** use a skill-relative reference for same-package skill content, or an explicit addressed reference, bundled dependency, or package-qualified public reference for cross-package content.
 
 ### Runtime dependency misclassification
 

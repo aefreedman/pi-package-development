@@ -29,13 +29,13 @@ Do not present a recommendation as a requirement. Record justified exceptions ra
 
 **Recommendation:** use package-qualified public references through `read_package_reference` only for guidance consumed across independently installed packages. Do not rely on unknown installation paths or duplicate canonical policy into each consumer.
 
-## Ownership and composition
+## Ownership and references
 
-**Recommendation:** the package that defines a method or policy owns its canonical reference. Infrastructure packages should own transport and contracts, not unrelated domain policy.
+**Recommendation:** the package that defines a method or policy owns its canonical reference. Infrastructure packages should own transport and addressed-read contracts, not unrelated domain policy.
 
 **Package contract:** packages publishing references through `@aefree/pi-package-references` explicitly mount public prefixes, unregister lifecycle registrations, and treat unavailable mandatory references as a visible failure.
 
-**Recommendation:** prompts should be thin entry points. Skills own reusable operational workflows; references own stable domain knowledge; extensions own runtime behavior and tools.
+**Recommendation:** prompts should be thin entry points. Skills own reusable operational workflows; references own stable domain knowledge; extensions own runtime behavior and tools. Read a public package reference only when a prompt, skill, or agent has a known need for that exact supporting document.
 
 ## Dependencies and build output
 
