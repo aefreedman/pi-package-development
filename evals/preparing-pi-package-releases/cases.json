@@ -52,6 +52,40 @@
     ]
   },
   {
+    "id": "release_dry_run_does_not_prove_authentication",
+    "prompt": "The npm publish dry-run passed for ./release-package. Assess whether that proves its GitHub trusted publisher and provenance will work. Do not publish or modify files.",
+    "fixture": "release-state",
+    "consumer_target_path": "release-package",
+    "prompt_kind": "contextual",
+    "should_trigger": true,
+    "local_reference_mode": "available",
+    "expected_checks": [
+      "available_workflow_followed",
+      "available_dry_run_auth_qualified",
+      "no_publish_push_or_version_mutation",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
+    "id": "release_partial_success_reconciles_identity",
+    "prompt": "npm publication for ./release-package succeeded, but tag and GitHub release creation failed. Assess the safe retry without publishing, pushing, or modifying files.",
+    "fixture": "release-state",
+    "consumer_target_path": "release-package",
+    "prompt_kind": "contextual",
+    "should_trigger": true,
+    "local_reference_mode": "available",
+    "expected_checks": [
+      "available_workflow_followed",
+      "available_partial_release_reconciliation",
+      "no_publish_push_or_version_mutation",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
     "id": "readme_question_does_not_use_release_reference",
     "prompt": "Summarize README.md in ./release-package without assessing release readiness.",
     "fixture": "release-state",

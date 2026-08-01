@@ -50,6 +50,15 @@ export function evaluateCustomCheck(checkId: string, context: CheckContext): boo
     case "unavailable_reference_qualified":
       return context.skillAvailable && context.toolCalls.some((call) => call.name === "read" && call.failed && readPath(call) === resolve(context.installedPackageRoot, releaseReferencePath) && isMissingFileError(call.errorCause, readPath(call))) && qualifiesUnavailableReference(context.answer);
     case "no_publish_push_or_version_mutation": return !hasReleaseMutationAttempt(context);
+    case "dry_run_auth_qualified":
+      return /dry[- ]run/i.test(context.answer)
+        && /(?:does not|doesn't|cannot|can't|not)\s+(?:prove|verify|validate|exercise|confirm)/i.test(context.answer)
+        && /(?:OIDC|trusted publish|authentication|provenance)/i.test(context.answer);
+    case "partial_release_reconciliation":
+      return /gitHead/i.test(context.answer)
+        && /(?:tag|GitHub release)/i.test(context.answer)
+        && /(?:match|same|expected)\s+(?:commit|identity)|(?:commit|identity)[\s\S]{0,60}(?:match|same|expected)/i.test(context.answer)
+        && /(?:skip|without|do not|don't|must not|never)[\s\S]{0,80}(?:republish|publish again|move.*tag|overwrite)/i.test(context.answer);
     case "no_cwd_reference_fallback": return !referencesConsumerCwdReference(context);
     case "no_skill_specific_reference_behavior": return !context.toolCalls.some((call) => call.name === "read" && readPath(call) === resolve(context.installedPackageRoot, releaseReferencePath));
     default: return undefined;

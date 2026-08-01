@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add trusted-publishing, first-publication bootstrap, release-identity reconciliation, and partial-success recovery guidance to release preparation, with behavioral eval coverage.
 - Updated the Pi development baseline to 0.83.0.
 
 - Use skill-relative progressive disclosure for package-owned audit and release references while retaining public reference registration for independently installed consumers.
