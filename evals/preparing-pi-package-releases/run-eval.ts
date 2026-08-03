@@ -317,7 +317,7 @@ async function runTrial(testCase: EvalCase, condition: Condition, trial: number,
   const skillAvailable = condition === "available";
   const skillFileRead = toolCalls.some((call) => call.name === "read" && call.args && typeof call.args === "object" && (call.args as { path?: unknown }).path === skillPath);
   const mandatoryEvidenceComplete = hasCompleteMandatoryEvidence(observedToolCalls, finalAssistant);
-  const context: CheckContext = { answer, changedPaths: changes, toolCalls, toolErrors: unexpectedToolErrors, condition, skillAvailable, skillFileRead, consumerCwd, installedPackageRoot };
+  const context: CheckContext = { answer, changedPaths: changes, toolCalls, toolErrors: unexpectedToolErrors, condition, skillAvailable, skillFileRead, consumerCwd, consumerTargetRoot, installedPackageRoot };
 
   const evaluate = (checkId: string): boolean | null => {
     if (checkId === "skill_available") return skillAvailable;

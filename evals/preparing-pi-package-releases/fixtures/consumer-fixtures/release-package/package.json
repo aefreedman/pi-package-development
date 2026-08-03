@@ -1,0 +1,20 @@
+{
+  "name": "@example/conformance-fixtures",
+  "version": "1.0.0",
+  "description": "Synthetic package with public conformance fixtures",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./fixtures": "./fixtures/index.json"
+  },
+  "files": [
+    "dist",
+    "fixtures",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

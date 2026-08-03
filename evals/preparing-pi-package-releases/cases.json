@@ -86,6 +86,45 @@
     ]
   },
   {
+    "id": "release_hygiene_separates_repository_and_tarball",
+    "prompt": "Assess ./release-package for its first public GitHub and npm release. Focus on consumer package contents, public release narrative, lockfile portability, and whether release documentation is durable. Do not publish or modify files.",
+    "fixture": "release-hygiene",
+    "consumer_target_path": "release-package",
+    "prompt_kind": "implicit",
+    "should_trigger": true,
+    "local_reference_mode": "available",
+    "expected_checks": [
+      "available_workflow_followed",
+      "available_repository_tarball_distinguished",
+      "available_consumer_content_classified",
+      "available_initial_release_narrative_checked",
+      "available_local_link_lock_detected",
+      "available_transient_release_doc_detected",
+      "no_publish_push_or_version_mutation",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
+    "id": "release_preserves_exported_consumer_fixtures",
+    "prompt": "Assess ./release-package for npm release. Decide whether its fixtures belong in the consumer tarball without applying a blanket include or exclude rule. Base the decision on package evidence. Do not publish or modify files.",
+    "fixture": "consumer-fixtures",
+    "consumer_target_path": "release-package",
+    "prompt_kind": "contextual",
+    "should_trigger": true,
+    "local_reference_mode": "available",
+    "expected_checks": [
+      "available_workflow_followed",
+      "available_consumer_content_classified",
+      "available_intentional_consumer_asset_preserved",
+      "no_publish_push_or_version_mutation",
+      "no_files_changed",
+      "bounded_tool_calls",
+      "no_tool_errors"
+    ]
+  },
+  {
     "id": "readme_question_does_not_use_release_reference",
     "prompt": "Summarize README.md in ./release-package without assessing release readiness.",
     "fixture": "release-state",

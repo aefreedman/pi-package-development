@@ -1,0 +1,20 @@
+{
+  "name": "@example/first-public-package",
+  "version": "1.0.0",
+  "description": "Synthetic first-release package",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "evals",
+    "tests",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "dependencies": {
+    "@example/runtime": "^1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

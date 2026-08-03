@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Require release preparation to separate public-repository content from npm consumer artifacts, justify each packed content class, detect local-link lockfiles and unpublished migration narratives, and avoid transient bootstrap documentation while preserving intentionally exported fixtures.
 - Retire generic automatic guidance-assembly recommendations while retaining explicit package-reference guidance.
 - Exclude development-only tests and behavioral evals from published npm artifacts.
 - Add trusted-publishing, first-publication bootstrap, release-identity reconciliation, and partial-success recovery guidance to release preparation, with behavioral eval coverage.

@@ -24,6 +24,12 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 - **Failure:** the package works only in the author's checkout.
 - **Remediation:** declare dependencies and include or reproducibly build required output.
 
+### Local-link lockfile contamination
+
+- **Evidence:** a publishable package lockfile contains `file:` or `workspace:` dependencies, `link: true`, or relative `resolved` paths that are satisfied by sibling repositories.
+- **Failure:** local installs pass while clean registry installs and CI fail or consume different dependency bytes.
+- **Remediation:** regenerate the lockfile against the intended registry dependencies and prove `npm ci` in an isolated checkout without sibling repositories.
+
 ### Cross-package filesystem coupling
 
 - **Evidence:** skills, prompts, or extensions read `../sibling-package`, fixed workspace paths, or installation-layout assumptions.
@@ -86,6 +92,26 @@ A smell is evidence requiring investigation, not automatic proof of a defect.
 - **Evidence:** `files`, `.npmignore`, generated output, and Pi resource declarations disagree.
 - **Failure:** required files are absent or unintended files are packed.
 - **Remediation:** reconcile metadata and verify `npm pack --dry-run`.
+
+### Development-only tarball leakage
+
+- **Evidence:** tests, evals, fixtures, CI files, contributor/security documents, planning notes, or release-operator instructions are packed without a documented consumer-facing purpose.
+- **Not a smell:** an exported conformance fixture, public example, or debugging resource has an intentional supported consumer contract.
+- **Failure:** consumers receive larger artifacts and internal process material that belongs only in the public repository.
+- **Remediation:** classify every packed content class by consumer purpose and exclude repository-only assets from the npm allowlist.
+
+### Pre-public migration narrative
+
+- **Evidence:** an initial release describes removed, renamed, legacy, hard-cut, migrated, or compatibility behavior that existed only during unpublished development.
+- **Failure:** README, changelog, tests, or user-facing diagnostics invent a public history and confuse the initial contract.
+- **Remediation:** describe the initial public behavior directly; retain migration language only when a prior public release establishes it.
+
+### Transient release-operator documentation
+
+- **Evidence:** a repository adds a release guide that only narrates the current one-time bootstrap and duplicates workflow or session instructions.
+- **Not a smell:** the document defines an enduring maintainer process used for future releases.
+- **Failure:** temporary coordination notes become permanent public package documentation and drift from automation.
+- **Remediation:** keep one-time instructions in the active release report or conversation; retain only durable process documentation and executable workflow invariants.
 
 ## Low
 

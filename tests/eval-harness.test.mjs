@@ -13,7 +13,7 @@ function context(toolCalls, condition = "available") {
     answer: "The required reference is unavailable, so I cannot claim a policy-complete audit.",
     changedPaths: [], toolCalls, toolErrors: 0, condition,
     skillAvailable: condition === "available", skillFileRead: false,
-    consumerCwd: resolve("/work/consumer"), installedPackageRoot: resolve("/work/installed-package"),
+    consumerCwd: resolve("/work/consumer"), consumerTargetRoot: resolve("/work/consumer/release-package"), installedPackageRoot: resolve("/work/installed-package"),
   };
 }
 
@@ -117,6 +117,29 @@ test("mandatory evidence keeps oversized args, failed-read cause, and the comple
   assert.equal(evidence.isMissingFileError(calls[0].errorCause, releaseReference), true);
   assert.equal(evidence.hasCompleteMandatoryEvidence(calls, { role: "assistant", content: [{ type: "text", text: finalAnswer }] }), true);
   assert.equal(evidence.hasCompleteMandatoryEvidence([{ ...calls[0], errorCause: undefined }], { role: "assistant", content: [] }), false);
+});
+
+test("release artifact hygiene checks require exact target evidence", () => {
+  const answer = `The public GitHub repository and npm tarball are separate surfaces. Classify every packed class by consumer purpose and keep runtime or public API files while excluding repository-only development assets. This is a first public release, so the changelog's renamed legacy tool, removed alias, and hard-cut migration language describes unpublished history and should be rewritten. package-lock.json contains link: true to a sibling path; regenerate it from the registry and prove npm ci in an isolated checkout. RELEASING.md is a one-time bootstrap note and should be removed rather than retained as durable documentation.`;
+  const targetRoot = resolve("/work/consumer/release-package");
+  const successfulReads = ["package.json", "package-lock.json", "CHANGELOG.md", "RELEASING.md"].map((file) => ({ name: "read", args: { path: resolve(targetRoot, file) }, failed: false }));
+  const evaluated = { ...context(successfulReads), answer };
+  for (const check of ["repository_tarball_distinguished", "consumer_content_classified", "initial_release_narrative_checked", "local_link_lock_detected", "transient_release_doc_detected"]) {
+    assert.equal(release.evaluateCustomCheck(check, evaluated), true, check);
+    assert.equal(release.evaluateCustomCheck(check, { ...evaluated, toolCalls: [] }), false, `${check} must reject answer-only evidence`);
+  }
+  const siblingRead = { name: "read", args: { path: resolve("/work/consumer/sibling/package-lock.json") }, failed: false };
+  assert.equal(release.evaluateCustomCheck("local_link_lock_detected", { ...evaluated, toolCalls: [siblingRead] }), false);
+});
+
+test("release artifact hygiene preserves intentional consumer fixtures from package evidence", () => {
+  const answer = "Keep and ship the exported conformance fixtures: downstream users import them as a supported public API and consumer contract. Their consumer purpose justifies inclusion in the tarball.";
+  const targetRoot = resolve("/work/consumer/release-package");
+  const reads = ["package.json", "README.md"].map((file) => ({ name: "read", args: { path: resolve(targetRoot, file) }, failed: false }));
+  assert.equal(release.evaluateCustomCheck("consumer_content_classified", { ...context(reads), answer }), true);
+  assert.equal(release.evaluateCustomCheck("intentional_consumer_asset_preserved", { ...context(reads), answer }), true);
+  assert.equal(release.evaluateCustomCheck("intentional_consumer_asset_preserved", { ...context([]), answer }), false);
+  assert.equal(release.evaluateCustomCheck("intentional_consumer_asset_preserved", { ...context(reads), answer: "Fixtures are development files, so exclude all of them." }), false);
 });
 
 test("timeout ownership leaves normal exits alone and terminates only a timed-out child", async () => {

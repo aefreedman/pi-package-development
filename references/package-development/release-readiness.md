@@ -11,13 +11,35 @@ A package is not ready for public npm publication until all of these are true:
 - `private: true` has been removed only as part of an authorized release preparation.
 - Every runtime dependency can resolve in a clean consumer installation.
 - Build and applicable deterministic tests pass.
-- Publishable source, documentation, skills, prompts, agents, references, tests, fixtures, screenshots, binary assets, configuration, and lockfiles have been reviewed for secrets and sensitive information.
-- `npm pack --dry-run` has been run and every included path reviewed.
-- The packed artifact contains all runtime resources and excludes unintended private or workspace-only material.
+- The complete public repository tree and the npm tarball have been reviewed as separate exposure surfaces for secrets, sensitive information, and internal-only material.
+- `npm pack --dry-run` has been run, its inventory grouped by content class and size, and every included class has a concrete consumer-facing purpose.
+- The packed artifact contains all runtime resources and excludes repository-only development material unless its consumer value is explicit and tested.
 - The version and changelog describe the complete intended release rather than intermediate attempts.
+- An initial release describes only behavior actually available in that release; it does not present unpublished predecessors, internal migrations, or abandoned names as public history.
+- The exact commit intended for publication—not merely an equivalent working tree—has passed final validation.
 - Actual publication has separate explicit authorization.
 
 For a scoped package intended to be public, verify that first publication uses public access. Do not infer npm credentials, account permissions, 2FA handling, provenance, or CI configuration; report what the environment requires.
+
+## Public repository and consumer artifact
+
+Treat the GitHub repository and npm tarball as separate products:
+
+- The public repository may intentionally contain tests, behavioral evals, fixtures, CI workflows, contributor guidance, security policy, and maintainer tooling.
+- The npm tarball should contain only runtime files, public APIs, loaded Pi resources, required legal/user documentation, and intentionally supported debugging material.
+- Owning a file in the package repository does not establish that npm consumers need it.
+
+For every packed top-level class, record its file count, size, consumer purpose, and keep/exclude decision. Default tests, evals, test fixtures, CI configuration, contributor/security documents, planning notes, migration notes, and one-time release instructions to repository-only. Keep one only when repository evidence establishes a concrete consumer contract, such as exported conformance fixtures or public examples loaded at runtime. Verify the exception rather than applying a blanket exclusion.
+
+When a package ships authored source alongside generated output, identify why both are needed. Examples include a Pi TypeScript extension that imports authored source at runtime or source maps intentionally supported for debugging. Otherwise prefer the smallest coherent artifact rather than publishing duplicate implementation forms by inertia.
+
+## Initial-release narrative hygiene
+
+Before a package's first public release, review README, changelog, package description, public docs, examples, test names, and user-visible diagnostics as if no predecessor existed. Terms such as “removed,” “renamed,” “legacy,” “hard cut,” “migration,” “compatibility alias,” or a former package/tool name require evidence that users of an earlier public version actually encountered that state. Rewrite unpublished development history as a direct description of the initial public behavior.
+
+Do not create or retain a release-operator document merely to preserve instructions for the current bootstrap. Keep maintainer documentation only when it is an enduring, repository-appropriate process that will remain useful for future releases. Put executable invariants in validated automation where practical.
+
+For a repository required to begin with fresh public history, inspect the commits and refs intended for push, not only the working tree. Rebuild or rewrite locally only when authorized, then rerun final validation against the resulting exact commit.
 
 ## npm authentication and trusted publishing
 
@@ -63,7 +85,7 @@ Skip an existing artifact only when it resolves to the expected version and comm
 
 Derive these from package evidence rather than enforcing a universal rule:
 
-- whether authored TypeScript, tests, fixtures, evals, or lockfiles ship;
+- whether authored TypeScript, tests, fixtures, evals, or lockfiles ship, with repository ownership explicitly treated as insufficient justification;
 - whether generated output is committed or produced during packaging;
 - whether a dependency should be published independently or bundled;
 - dependency publication order;
@@ -84,21 +106,30 @@ For every runtime import and loaded Pi resource:
 4. Prefer independent publication when the dependency has its own public contract or is shared by multiple packages.
 5. Bundle only when it is intentionally implementation-private and Pi's package resource-loading rules are satisfied.
 
-Local sibling installs are useful validation aids but are not evidence that registry consumers can install the package.
+Local sibling installs are useful validation aids but are not evidence that registry consumers can install the package. Inspect the lockfile for `file:` or `workspace:` dependencies, `link: true`, and relative `resolved` paths. Regenerate contaminated lockfiles against the intended registry and prove `npm ci` in an isolated checkout without sibling repositories.
 
 ## Artifact review
 
 Inspect both metadata and bytes represented by the tarball inventory. Check at minimum:
 
-- package name, version, description, license, repository, exports, engines, and `pi` declarations;
+- package name, version, description, license, repository, exports, engines, scripts, and `pi` declarations;
 - extension entry points and required build output;
 - skill, prompt, theme, reference, and asset paths;
 - README installation and failure behavior;
 - source maps and generated declarations for machine paths or unintended source disclosure;
-- fixtures and eval data for private content;
+- whether authored source and generated output are both intentionally required;
+- whether tests, evals, fixtures, workflows, contributor docs, security docs, or maintainer notes are packed and why a consumer needs each class;
+- whether packed scripts or manifest entries point to files intentionally omitted from the artifact;
 - dependency and peer-dependency classifications.
 
-A successful dry run proves that npm can construct a tarball, not that the tarball is safe or functional.
+Summarize the result as a table:
+
+| Packed class | Files/bytes | Consumer purpose | Decision |
+|---|---:|---|---|
+| Example: `dist/` | measured | Public runtime and declarations | Keep |
+| Example: `evals/` | measured | Repository-only behavioral regression suite | Exclude |
+
+A successful dry run proves that npm can construct a tarball, not that the tarball is minimal, safe, or functional.
 
 ## Validation evidence
 
@@ -106,7 +137,10 @@ Prefer a clean-install or packed-artifact smoke test when practical. At minimum 
 
 - commands run and their working directory;
 - build and test outcomes;
-- dry-run tarball inventory review;
+- grouped dry-run tarball inventory with consumer-purpose decisions;
+- separate public-repository and packed-artifact content scans;
+- initial-release narrative review when applicable;
+- isolated-checkout lockfile installation evidence when practical;
 - unresolved warnings or vulnerabilities and whether they affect consumers;
 - dependencies that must be released first;
 - checks intentionally not run;

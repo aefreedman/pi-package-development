@@ -17,19 +17,22 @@ Do not use `read_package_reference` for this package-owned file. Reserve it for 
 
 1. Resolve the exact package root and confirm it contains `package.json`.
 2. Load the required package-local release-readiness reference.
-3. Inspect manifest metadata, Pi resources, exports, dependencies, README, changelog, and publish allowlists.
-4. Trace runtime dependencies and identify unpublished or locally satisfied prerequisites.
-5. Review every potentially packed content class for secrets and sensitive information.
-6. Run focused package validation from the manifest root.
-7. Run `npm pack --dry-run` and review the complete inventory.
-8. Determine the intended authentication path: first-publication bootstrap/manual authentication, steady-state OIDC trusted publishing, or an explicitly justified token fallback.
-9. Reconcile release identity across the expected source commit, npm `gitHead`, local/remote tag, and GitHub release before proposing an attempt or retry.
-10. When practical, validate a clean consumer or packed-artifact installation.
-11. Report blockers, package-specific decisions, evidence, and the exact next authorized step.
+3. Inspect manifest metadata, Pi resources, exports, dependencies, README, changelog, scripts, and publish allowlists.
+4. Review the public repository and npm tarball as separate surfaces: repository-owned development assets do not automatically belong in the consumer artifact.
+5. For an initial public release, inspect public prose and reachable history for unpublished migration language, stale identities, private material, and one-time operator notes.
+6. Trace runtime dependencies and reject lockfile entries satisfied only by local links, sibling paths, or workspace protocols unless the published consumer intentionally supports them.
+7. Run focused package validation from the manifest root.
+8. Run `npm pack --dry-run`, group the complete inventory by content class and size, and record a consumer-facing purpose for every included class.
+9. Review both the public-repository tree and the packed bytes for secrets and sensitive information.
+10. Determine the intended authentication path: first-publication bootstrap/manual authentication, steady-state OIDC trusted publishing, or an explicitly justified token fallback.
+11. Reconcile release identity across the exact validated source commit, npm `gitHead`, local/remote tag, and GitHub release before proposing an attempt or retry.
+12. When practical, validate `npm ci` from an isolated checkout and install the packed artifact in a neutral consumer.
+13. Report blockers, package-specific decisions, evidence, and the exact next authorized step.
 
 ## Decision Discipline
 
 - Apply established safety gates; derive package-shape choices from repository evidence.
+- Package ownership is not consumer necessity. Default tests, evals, fixtures, CI files, contributor/security documents, planning notes, and one-time release instructions to repository-only unless a concrete runtime, public API, loaded-resource, legal, user-documentation, or supported debugging purpose justifies packing them.
 - Do not require provenance, lockfile inclusion, source publication, test publication, bundling, or a tag strategy without supporting evidence.
 - Local sibling dependencies do not establish npm consumer readiness.
 - Distinguish package defects from environment, account, registry, and CI identity prerequisites.
@@ -47,8 +50,9 @@ Report, in order:
 1. release blockers;
 2. required corrections;
 3. package-specific decisions and recommendations;
-4. validation evidence;
-5. authentication model, trusted-publisher prerequisites, and whether real authentication was exercised;
-6. npm version/`gitHead`, tag, GitHub release, and provenance reconciliation when applicable;
-7. unverified checks;
-8. proposed release order, recovery state, and next authorized step.
+4. a packed-content table with content class, size/count, consumer purpose, and keep/exclude decision;
+5. validation evidence;
+6. authentication model, trusted-publisher prerequisites, and whether real authentication was exercised;
+7. npm version/`gitHead`, tag, GitHub release, and provenance reconciliation when applicable;
+8. unverified checks;
+9. proposed release order, recovery state, and next authorized step.
