@@ -8,6 +8,7 @@
 - Canonical package-development references registered through `read_package_reference` for independently installed external consumers
 - The `auditing-pi-packages` skill
 - The `preparing-pi-package-releases` skill
+- The `streamlining-skills` skill for reducing Pi skill context cost through explicit progressive disclosure
 - The `/audit-package <package-path>` prompt template
 - The `/prepare-package-release <package-path>` prompt template
 - The `/package-status <package-path> [...]` prompt template
@@ -20,7 +21,7 @@ Install this package to use its skills and prompts:
 pi install npm:@aefree/pi-package-development
 ```
 
-The audit and release-preparation skills load their package-owned references through paths relative to their own `SKILL.md` files; they do not require `read_package_reference` for those files.
+The audit, release-preparation, and streamlining skills load their package-owned references through paths relative to their own `SKILL.md` files; they do not require `read_package_reference` for those files.
 
 ### External reference consumers
 

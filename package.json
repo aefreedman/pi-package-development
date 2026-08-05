@@ -1,6 +1,6 @@
 {
   "name": "@aefree/pi-package-development",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Methods, architecture guidance, and workflows for developing Pi packages.",
   "type": "module",
   "sideEffects": [

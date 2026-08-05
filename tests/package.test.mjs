@@ -12,6 +12,29 @@ test("declares its Pi resources", () => {
   assert.deepEqual(manifest.pi.prompts, ["./prompts"]);
 });
 
+test("ships Pi-native streamlining guidance", async () => {
+  const skill = await readFile(new URL("../skills/streamlining-skills/SKILL.md", import.meta.url), "utf8");
+  assert.match(skill, /name: streamlining-skills/);
+  assert.match(skill, /Pi loads the selected skill's complete `SKILL\.md`/);
+  assert.doesNotMatch(skill, /Follow nested `@/);
+
+  for (const name of ["checklist.md", "frontmatter.md", "ref-splitting.md", "section-normalization.md"]) {
+    const reference = await readFile(new URL(`../skills/streamlining-skills/references/${name}`, import.meta.url), "utf8");
+    assert.ok(reference.length > 400, `${name} should contain substantive Pi guidance`);
+  }
+});
+
+test("ships the expected trusted-publishing release workflow", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  assert.match(workflow, /release:\s*\n\s+types:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /environment: npm/);
+  assert.match(workflow, /npm@\^11\.5\.1/);
+  assert.match(workflow, /npm publish --access public --provenance/);
+  assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN/);
+});
+
 test("ships the references required by the audit skill", async () => {
   const names = [
     "conventions.md",

@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-08-05
 
+- Add the moved `streamlining-skills` skill with Pi-native discovery, frontmatter, and explicit on-demand reference guidance.
+- Add the expected `.github/workflows/release.yml` trusted-publishing workflow with resumable npm/gitHead reconciliation and provenance.
 - Require release preparation to separate public-repository content from npm consumer artifacts, justify each packed content class, detect local-link lockfiles and unpublished migration narratives, and avoid transient bootstrap documentation while preserving intentionally exported fixtures.
 - Retire generic automatic guidance-assembly recommendations while retaining explicit package-reference guidance.
 - Exclude development-only tests and behavioral evals from published npm artifacts.
