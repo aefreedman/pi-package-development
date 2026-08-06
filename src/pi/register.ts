@@ -7,6 +7,7 @@ import {
   registerPackageReferenceOwnerV1,
   unregisterPackageReferenceOwnerV1,
 } from "@aefree/pi-package-references/runtime/v1";
+import { registerSessionAnalysis } from "./session-analysis.js";
 
 interface Manifest {
   name: string;
@@ -14,6 +15,8 @@ interface Manifest {
 }
 
 export default function registerPackageDevelopment(pi: ExtensionAPI): void {
+  registerSessionAnalysis(pi);
+
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const manifest = JSON.parse(
     readFileSync(resolve(packageRoot, "package.json"), "utf8"),

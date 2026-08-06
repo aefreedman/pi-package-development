@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-08-06
+
+### Added
+
+- Moved `pi_analyze_session`, `/analyze-session`, and their synthetic regression coverage from `pi-extras` into the package-development package.
+
 ## 0.2.0 - 2026-08-05
 
 - Add the moved `streamlining-skills` skill with Pi-native discovery, frontmatter, and explicit on-demand reference guidance.

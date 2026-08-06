@@ -12,6 +12,20 @@ test("declares its Pi resources", () => {
   assert.deepEqual(manifest.pi.prompts, ["./prompts"]);
 });
 
+test("ships session analysis tooling and prompt guidance", async () => {
+  const source = await readFile(new URL("../src/pi/session-analysis.ts", import.meta.url), "utf8");
+  const prompt = await readFile(new URL("../prompts/analyze-session.md", import.meta.url), "utf8");
+  assert.match(source, /name: "pi_analyze_session"/);
+  assert.match(source, /historical\/untrusted evidence/);
+  assert.match(source, /approvedSourceRoots/);
+  assert.match(prompt, /Review the analysis method itself/);
+
+  for (const fixture of ["parallel-search-10.jsonl", "parallel-search-8.jsonl", "identifier-bulk-amplification.jsonl", "windows-secondary.jsonl", "malformed.jsonl"]) {
+    const contents = await readFile(new URL(`../tests/fixtures/session-analysis/${fixture}`, import.meta.url), "utf8");
+    assert.ok(contents.length > 0, `${fixture} should contain synthetic regression evidence`);
+  }
+});
+
 test("ships Pi-native streamlining guidance", async () => {
   const skill = await readFile(new URL("../skills/streamlining-skills/SKILL.md", import.meta.url), "utf8");
   assert.match(skill, /name: streamlining-skills/);

@@ -11,6 +11,11 @@ const packageRoot = await realpath(new URL("../", import.meta.url));
 
 class FakePi {
   handlers = new Map();
+  tools = [];
+
+  registerTool(tool) {
+    this.tools.push(tool);
+  }
 
   on(event, handler) {
     const handlers = this.handlers.get(event) ?? [];
@@ -34,6 +39,7 @@ test("session_start registers the package's public reference mount and shutdown 
   const sessionManager = {};
   registerPackageDevelopment(pi);
 
+  assert.deepEqual(pi.tools.map((tool) => tool.name), ["pi_analyze_session"]);
   assert.equal(pi.handlers.get("session_start")?.length, 1);
   assert.equal(pi.handlers.get("session_shutdown")?.length, 1);
   await pi.emit("session_start", sessionManager);
