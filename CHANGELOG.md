@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-08-09
+
+### Added
+
+- Merge the package-owned behavioral-eval workflow, starter assets, `building-skill-evals` skill, and `skill_eval_bootstrap`/`skill_eval_review` tools from `pi-skill-evals`.
+
 ## 0.3.0 - 2026-08-06
 
 ### Added

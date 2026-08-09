@@ -39,7 +39,7 @@ test("session_start registers the package's public reference mount and shutdown 
   const sessionManager = {};
   registerPackageDevelopment(pi);
 
-  assert.deepEqual(pi.tools.map((tool) => tool.name), ["pi_analyze_session"]);
+  assert.deepEqual(pi.tools.map((tool) => tool.name), ["pi_analyze_session", "skill_eval_bootstrap", "skill_eval_review"]);
   assert.equal(pi.handlers.get("session_start")?.length, 1);
   assert.equal(pi.handlers.get("session_shutdown")?.length, 1);
   await pi.emit("session_start", sessionManager);

@@ -7,7 +7,9 @@ import registerPackageDevelopment from "../dist/pi/register.js";
 let registeredTool;
 registerPackageDevelopment({
   on() {},
-  registerTool(tool) { registeredTool = tool; },
+  registerTool(tool) {
+    if (tool.name === "pi_analyze_session") registeredTool = tool;
+  },
 });
 assert(registeredTool, "Expected pi_analyze_session tool to register.");
 

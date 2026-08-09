@@ -8,6 +8,7 @@ const manifest = JSON.parse(
 
 test("declares its Pi resources", () => {
   assert.deepEqual(manifest.pi.extensions, ["./extensions/index.ts"]);
+  assert.ok(!manifest.files.includes("src"), "Compiled dist is the consumer runtime; authored source remains repository-only.");
   assert.deepEqual(manifest.pi.skills, ["./skills"]);
   assert.deepEqual(manifest.pi.prompts, ["./prompts"]);
 });
@@ -23,6 +24,24 @@ test("ships session analysis tooling and prompt guidance", async () => {
   for (const fixture of ["parallel-search-10.jsonl", "parallel-search-8.jsonl", "identifier-bulk-amplification.jsonl", "windows-secondary.jsonl", "malformed.jsonl"]) {
     const contents = await readFile(new URL(`../tests/fixtures/session-analysis/${fixture}`, import.meta.url), "utf8");
     assert.ok(contents.length > 0, `${fixture} should contain synthetic regression evidence`);
+  }
+});
+
+test("ships skill-eval scaffolding, review tooling, and guidance", async () => {
+  const extension = await readFile(new URL("../src/pi/skill-evals.ts", import.meta.url), "utf8");
+  const register = await readFile(new URL("../src/pi/register.ts", import.meta.url), "utf8");
+  assert.match(extension, /name: "skill_eval_bootstrap"/);
+  assert.match(extension, /name: "skill_eval_review"/);
+  assert.match(extension, /preview mode before apply/);
+  assert.match(register, /registerSkillEvals\(pi\)/);
+
+  for (const name of ["methodology.md", "prompt-set-design.md", "check-design.md", "pilot-and-interpretation.md", "getting-started.md", "methodology-and-sources.md"]) {
+    const reference = await readFile(new URL(`../skills/building-skill-evals/references/${name}`, import.meta.url), "utf8");
+    assert.ok(reference.length > 400, `${name} should contain substantive eval guidance`);
+  }
+  for (const name of ["run-eval.ts", "checks.ts"]) {
+    const asset = await readFile(new URL(`../skills/building-skill-evals/assets/starter/${name}`, import.meta.url), "utf8");
+    assert.ok(asset.length > 400, `${name} should be a substantive starter asset`);
   }
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "@aefree/pi-package-development",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Methods, architecture guidance, and workflows for developing Pi packages.",
   "type": "module",
   "sideEffects": [
@@ -10,11 +10,12 @@
   "keywords": [
     "pi-package",
     "package-development",
-    "architecture"
+    "architecture",
+    "agent-skills",
+    "evals"
   ],
   "files": [
     "dist",
-    "src",
     "extensions",
     "references",
     "skills",
@@ -37,7 +38,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs tests/skill-evals/*.test.ts",
     "eval:audit": "node --experimental-strip-types evals/auditing-pi-packages/run-eval.ts",
     "eval:release": "node --experimental-strip-types evals/preparing-pi-package-releases/run-eval.ts",
     "pack:check": "npm pack --dry-run"

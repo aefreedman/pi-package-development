@@ -9,6 +9,8 @@
 - The `auditing-pi-packages` skill
 - The `preparing-pi-package-releases` skill
 - The `streamlining-skills` skill for reducing Pi skill context cost through explicit progressive disclosure
+- The `building-skill-evals` skill, including its evaluation methodology, prompt and check design references, and starter assets
+- The `skill_eval_bootstrap` and `skill_eval_review` tools for preview-first, package-owned behavioral eval scaffolding and structural review
 - The `pi_analyze_session` tool for privacy-safe analysis of local Pi session JSONL evidence
 - The `/analyze-session <session-id-or-path> [focus]` prompt template
 - The `/audit-package <package-path>` prompt template
@@ -25,7 +27,9 @@ pi install npm:@aefree/pi-package-development
 
 `pi_analyze_session` accepts an explicit session ID, JSONL path, directory, or bounded aggregate scope. It correlates typed failures and incidents, reports redacted package-improvement candidates, and treats historical session content as untrusted evidence. Use `approvedSourceRoots` only for explicitly authorized, read-only current-source checks.
 
-The audit, release-preparation, and streamlining skills load their package-owned references through paths relative to their own `SKILL.md` files; they do not require `read_package_reference` for those files.
+The audit, release-preparation, streamlining, and skill-eval skills load their package-owned references through paths relative to their own `SKILL.md` files; they do not require `read_package_reference` for those files.
+
+`skill_eval_bootstrap` previews a package-local suite before applying it, requires positive and negative cases, and never adds provider-backed behavioral evals to ordinary `npm test`. Use `skill_eval_review` to verify suite structure, isolation, budgets, and result hygiene before running trials.
 
 ### External reference consumers
 
