@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import { scanSessionCorpus, corpusIncomplete, type CorpusParams, type CorpusSource, type CorpusRecord } from "./session-corpus.js";
-import { EvidenceBuilder, EvidenceStore, EVIDENCE_LIMITS, type Classification, type CallEvidence, type QueryParams } from "./session-evidence.js";
+import { EvidenceBuilder, EvidenceStore, EVIDENCE_LIMITS, publicToolLabel, type Classification, type CallEvidence, type QueryParams } from "./session-evidence.js";
 
 type Params = CorpusParams & { limitLeads?: number };
 type Call = { name: string; entryKey: string; counted: boolean; evidence: CallEvidence; result?: boolean; args: Record<string, unknown> };
@@ -130,7 +130,7 @@ async function analyzeSessionFile(source: CorpusSource, builder: EvidenceBuilder
         calls.push(call);
         if (nativeId !== undefined) { const ids = callsById.get(nativeId) ?? []; ids.push(call); callsById.set(nativeId, ids); }
         const pending = pendingByName.get(name) ?? []; pending.push(call); pendingByName.set(name, pending);
-        if (counted) { summary.toolCalls++; emit(record, { kind: "tool_call", provenance, toolRef: call.evidence.toolRef, call: call.evidence }); }
+        if (counted) { summary.toolCalls++; emit(record, { kind: "tool_call", provenance, toolRef: call.evidence.toolRef, ...(call.evidence.toolLabel ? { toolLabel: call.evidence.toolLabel } : {}), call: call.evidence }); }
       }
     }
     if (message.role === "toolResult") {
@@ -150,7 +150,8 @@ async function analyzeSessionFile(source: CorpusSource, builder: EvidenceBuilder
         if (outcome.heuristicLead) summary.heuristicLeads++;
         if (outcome.failed) summary.failures++;
         const callTime = correlated?.evidence.locator.time;
-        emit(record, { kind: "tool_result", provenance, toolRef: builder.ref("t", name), outcome,
+        const toolLabel = publicToolLabel(name);
+        emit(record, { kind: "tool_result", provenance, toolRef: builder.ref("t", name), ...(toolLabel ? { toolLabel } : {}), outcome,
           join: correlated ? suppliedId ? "native_id_ancestry" : "legacy_name_ancestry" : "unresolved",
           ...(correlated ? { call: correlated.evidence, messageObservedSpanMs: callTime != null && record.time !== undefined && record.time >= callTime ? record.time - callTime : null } : {}) });
       }
@@ -223,18 +224,21 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
           ...Object.fromEntries(["unresolvedCalls", "unresolvedResults", "unsupportedMessages", "unknownOutcomes", "heuristicLeads", "legacyCorrelations", "assistantErrors", "assistantAborts"].map(key => [key, sum(key as keyof Summary)])),
           nativeOutcomes: outcomes("nativeOutcomes"), semanticOutcomes: outcomes("semanticOutcomes") },
         method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked.",
-        privacy: "Opaque report-local refs; all source text, paths, native IDs, tool names, argument keys/values and result details omitted.",
+        privacy: "Opaque report-local refs with vetted literal public tool labels only. Source text, paths, native IDs, unvetted tool names, argument keys/values and result details omitted. Local paths require a separate explicitly authorized locator query.",
       }, params.limitLeads);
     },
   });
   pi.registerTool({
     name: "pi_query_session", label: "Pi Query Session Evidence",
-    description: "Resolve an opaque report + lead/event/tool ref in one query; or page view='leads'/'events'. Up to 10 rows, entire result <=8 KiB. Repeat the selector with nextCursor. Checks selected-page source metadata; stale/expired/invalid refs fail without rescanning. release=true drops the private index.",
+    description: "Resolve report + lead/event/tool refs or page leads/events; up to 10 rows, entire result <=8 KiB. Repeat selector with nextCursor. For user-authorized local source inspection ONLY, view='locator' + exact eventRef + allowLocalPathDisclosure=true reveals one existing source path/line (target event/call/context, contextIndex 0 or 1). No arbitrary path input or raw content. Checks source freshness/scope/expiry; no rescanning. release=true drops the index.",
     parameters: Type.Object({
       reportRef: Type.String(), leadRef: Type.Optional(Type.String()), eventRef: Type.Optional(Type.String()), toolRef: Type.Optional(Type.String()),
-      view: Type.Optional(Type.String({ enum: ["events", "leads"] })), cursor: Type.Optional(Type.String()),
+      view: Type.Optional(Type.String({ enum: ["events", "leads", "locator"] })), cursor: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: EVIDENCE_LIMITS.pageRows, default: 3 })), release: Type.Optional(Type.Boolean()),
-    }),
+      allowLocalPathDisclosure: Type.Optional(Type.Boolean({ description: "Explicit opt-in to revealing a local source path. Use only when the user authorized local source inspection, not merely safe triage." })),
+      target: Type.Optional(Type.String({ enum: ["event", "call", "context"] })),
+      contextIndex: Type.Optional(Type.Integer({ minimum: 0, maximum: 1 })),
+    }, { additionalProperties: false }),
     async execute(_id, params: QueryParams, signal, _onUpdate, ctx) { return store.query(params, ctx.sessionManager ?? ctx.cwd, signal); },
   });
 }

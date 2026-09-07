@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Make evidence follow-up actionable with vetted literal public tool labels and an explicitly opted-in exact event/call/context source-locator query. Default output still omits local paths and private names; local disclosure requires inspection authorization and retains byte, scope, freshness and expiry guards. Add an aggregate triage → locator → native read regression.
 - Disclose unsupported or malformed role-specific content blocks without interpreting them as executions, and prevent supplied result IDs from binding internal missing-ID placeholders. Preserve valid sibling blocks, native states and explicit absent-ID legacy joins.
 - Account for native session header identities, exact copied lineage history, unsupported containers, inclusive UTC event windows, and partial coverage with bounded cancellable JSONL scans.
 - Integrate corpus accounting into session analysis, strictly join tool IDs within branch ancestry, support string/image user content and assistant terminal errors/aborts, and separate native/package outcomes from unverified text leads. Unknown formats, outcomes and incomplete joins remain explicit; message timing does not prove execution latency or timeout effects.

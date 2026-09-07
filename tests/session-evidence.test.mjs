@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Value } from "typebox/value";
 import register from "../dist/pi/register.js";
-import { EVIDENCE_LIMITS } from "../dist/pi/session-evidence.js";
+import { EVIDENCE_LIMITS, evidenceResult } from "../dist/pi/session-evidence.js";
+import { createReadToolDefinition } from "@earendil-works/pi-coding-agent";
 const time = Date.parse("2026-01-02T12:00:00Z");
 const bounds = { since: "2026-01-02", until: "2026-01-02", asOf: "2026-01-03T00:00:00Z" };
 const canary = "SYNTHETIC_PRIVATE_CANARY";
@@ -32,6 +33,88 @@ async function fixture(fn) {
   const safe = (result) => { assert(Buffer.byteLength(JSON.stringify(result)) <= 8192); assert(!JSON.stringify(result).includes(canary)); assert(!JSON.stringify(result).includes(root)); assert.deepEqual(JSON.parse(result.content[0].text), result.details); };
   try { await fn({ root, ctx, tools, handlers, scan, query, save, safe }); } finally { for (const fn of handlers.get("session_shutdown") ?? []) await fn({}, ctx); await rm(root, { recursive: true, force: true }); }
 }
+
+test("aggregate triage identifies a public operation and one opted-in locator feeds the real read tool without discovery", async (t) => fixture(async ({ root, ctx, save, scan, query, safe }) => {
+  const rows = [header(canary), "", msg("u", null, { role: "user", content: canary }), ...pair("1", "u", "read")];
+  const expected = await save("LOCAL_PATH_CANARY.jsonl", rows);
+  await save("other.jsonl", [header("other"), ...pair("2", null, "write")]);
+  await save("unknown.jsonl", [header("unknown"), ...pair("3", null, `read_${canary}`)]);
+  const report = await scan({ session: "all", projectFolder: root, limitLeads: 10 }); safe(report);
+  assert.equal(report.details.corpus.processedFiles, 3);
+  assert.deepEqual(report.details.rows.map(lead => lead.toolLabel).filter(Boolean).sort(), ["read", "write"]);
+  assert.equal(report.details.rows.filter(lead => !lead.toolLabel).length, 1, "private prefix lookalike remains opaque");
+  const lead = report.details.rows.find(lead => lead.toolLabel === "read");
+  const started = performance.now();
+  const local = await query(report, { view: "locator", eventRef: lead.eventRef, allowLocalPathDisclosure: true });
+  const queryMs = performance.now() - started;
+  assert.equal(local.details.locator.path, expected); assert.equal(local.details.locator.line, 5);
+  assert.equal(local.details.sourceChecks, 1); assert.equal(local.details.locator.block, undefined);
+  assert(!JSON.stringify(local).includes(canary), "opt-in path does not reveal native IDs, args, output or user text");
+  assert(Buffer.byteLength(JSON.stringify(local)) <= 8192);
+  const nativeRead = createReadToolDefinition(ctx.cwd);
+  const read = await nativeRead.execute("read-exact-source", { path: local.details.locator.path, offset: local.details.locator.line, limit: 1 }, undefined, undefined, ctx);
+  assert.equal(read.content[0].text.split("\n")[0], JSON.stringify(rows[4]), "real read receives exact source line without search or corpus JSON parsing");
+  const packet = (await query(report, { eventRef: lead.eventRef })).details.rows[0];
+  assert.equal(packet.toolLabel, "read"); assert.equal(packet.call.toolLabel, "read");
+  const call = await query(report, { view: "locator", eventRef: lead.eventRef, target: "call", allowLocalPathDisclosure: true });
+  assert.equal(call.details.locator.path, expected); assert.equal(call.details.locator.line, 4); assert.equal(call.details.locator.block, 1);
+  const toolPage = await query(report, { toolRef: lead.toolRef });
+  const callEvent = toolPage.details.rows.find(row => row.kind === "tool_call");
+  const ownCall = await query(report, { view: "locator", eventRef: callEvent.eventRef, allowLocalPathDisclosure: true });
+  assert.equal(ownCall.details.locator.line, 4); assert.equal(ownCall.details.locator.block, 1);
+  const context = await query(report, { view: "locator", eventRef: lead.eventRef, target: "context", contextIndex: 1, allowLocalPathDisclosure: true });
+  assert.equal(context.details.locator.line, 3); assert.equal(context.details.locator.entryRef, packet.context[1].provenance.entryRef);
+  assert.equal(context.details.locator.block, undefined, "context addresses the whole record, not a guessed call");
+  const defaultAgain = await query(report, { eventRef: lead.eventRef }); safe(defaultAgain);
+  t.diagnostic(JSON.stringify({ locatorQueriesToSource: 1, sourceStatChecks: local.details.sourceChecks, locatorBytes: Buffer.byteLength(JSON.stringify(local)), locatorMs: +queryMs.toFixed(2), subsequentNativeReadCalls: 1, requestedReadLines: 1 }));
+}));
+
+test("public labels require whole-string literals, not prefixes, casing, injected text or runtime fields", async () => fixture(async ({ save, scan, query, safe }) => {
+  const names = ["codecks_card_get", `codecks_${canary}`, `read${canary}`, "READ", "read\n", "constructor", "toString"];
+  const rows = [header("literal-labels")];
+  for (const [i, name] of names.entries()) rows.push(...pair(String(i), i ? `r${i-1}` : null, name, true, {}, { toolLabel: "read", details: { toolName: "read", label: "read" } }));
+  await save("session.jsonl", rows);
+  const report = await scan({ limitLeads: 10 }); safe(report);
+  const leads = [...report.details.rows]; let cursor = report.details.nextCursor;
+  while (cursor) { const page = await query(report, { view: "leads", cursor }); safe(page); leads.push(...page.details.rows); cursor = page.details.nextCursor; }
+  assert.deepEqual(leads.filter(lead => lead.toolLabel).map(lead => lead.toolLabel), ["codecks_card_get"]);
+  assert.equal(leads.length, names.length);
+}));
+
+test("locator selectors require exact opt-in/event/retained target and reject path widening and malformed selectors", async () => fixture(async ({ save, scan, query, ctx, tools }) => {
+  await save("session.jsonl", [header("locator-selectors"), ...pair("1", null, "read")]);
+  const report = await scan(); const eventRef = report.details.rows[0].eventRef;
+  const base = { reportRef: report.details.reportRef, view: "locator", eventRef, allowLocalPathDisclosure: true };
+  const invalid = [{ allowLocalPathDisclosure: false }, { allowLocalPathDisclosure: undefined }, { allowLocalPathDisclosure: "true" }, { eventRef: undefined }, { eventRef: null }, { target: "source" }, { target: null }, { target: "context" }, { target: "context", contextIndex: -1 }, { target: "context", contextIndex: 2 }, { target: "context", contextIndex: 0.5 }, { target: "event", contextIndex: 0 }, { target: "call", contextIndex: 0 }, { path: canary }, { sourceRef: "s_other" }, { line: 1 }, { block: 0 }, { cursor: "0" }, { limit: 1 }, { leadRef: report.details.rows[0].leadRef }, { toolRef: "t_other" }, { release: true }];
+  for (const extra of invalid) await assert.rejects(tools.get("pi_query_session").execute("bad-locator", { ...base, ...extra }, undefined, undefined, ctx), error => error.message === "invalid_locator_selector");
+  assert(!Value.Check(tools.get("pi_query_session").parameters, { ...base, path: canary }), "schema also forbids arbitrary path input");
+  await assert.rejects(query(report, { eventRef, allowLocalPathDisclosure: true }), /invalid_locator_selector/);
+  await assert.rejects(query(report, { view: "locator", eventRef, target: "context", contextIndex: 1, allowLocalPathDisclosure: true }), /locator_target_unavailable/);
+  const packet = (await query(report, { eventRef })).details.rows[0];
+  await assert.rejects(query(report, { view: "locator", eventRef: packet.provenance.entryRef, allowLocalPathDisclosure: true }), /invalid_event_or_tool_ref/);
+  await save("unmatched.jsonl", [header("unmatched"), msg("r", null, { role: "toolResult", toolName: "read", toolCallId: "missing", isError: true, content: [] })]);
+  const unmatched = await scan({ session: "./unmatched.jsonl" });
+  await assert.rejects(query(unmatched, { view: "locator", eventRef: unmatched.details.rows[0].eventRef, target: "call", allowLocalPathDisclosure: true }), /locator_target_unavailable/);
+}));
+
+test("opted-in locators preserve stale, expired, cross-scope and output-bound protections", async () => fixture(async ({ save, scan, query, ctx }) => {
+  const rows = [header("locator-guards"), ...pair("1", null, "read")]; const file = await save("session.jsonl", rows);
+  let report = await scan();
+  const args = (report, extra = {}) => ({ view: "locator", eventRef: report.details.rows[0].eventRef, allowLocalPathDisclosure: true, ...extra });
+  await assert.rejects(query(report, args(report), { ...ctx, sessionManager: {} }), /invalid_report_scope/);
+  const other = await scan(); await assert.rejects(query(other, args(report)), /invalid_event_or_tool_ref/);
+  for (const target of ["event", "call", "context"]) {
+    report = await scan(); await appendFile(file, "\n");
+    await assert.rejects(query(report, args(report, { target, ...(target === "context" ? { contextIndex: 0 } : {}) })), /stale_source/);
+  }
+  report = await scan(); const realNow = Date.now;
+  try { Date.now = () => report.details.expiresAt; await assert.rejects(query(report, args(report)), /expired_report/); } finally { Date.now = realNow; }
+  report = await scan(); const aborted = new AbortController(); aborted.abort();
+  await assert.rejects(query(report, args(report), ctx, aborted.signal), /evidence_query_cancelled/);
+  const locator = await query(report, args(report)); assert(Buffer.byteLength(JSON.stringify(locator)) <= 8192);
+  // The same serialization gate rejects an oversized local path instead of truncating an exact locator.
+  assert.throws(() => evidenceResult({ ...locator.details, locator: { ...locator.details.locator, path: canary.repeat(500) } }), error => error.message === "evidence_response_limit");
+}));
 
 test("registered scan→query discovers arbitrary tools; every lead resolves, with exact private-safe call/result/ancestry provenance", async () => fixture(async ({ save, scan, query, safe }) => {
   const rows = [header(canary), "", msg("u", null, { role: "user", content: canary }), ...pair("1", "u"), ...pair("2", "r1", "another_unregistered_owner", true)];
