@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Replace diagnostic session ranking, inferred recovery/concurrency/corrections and source-marker “fixed” claims with unreviewed typed-signature leads. Preserve selection/time/native-call accounting; intentionally retire diagnostic knobs and outputs in evidence schema 2, with resume argument compatibility documented.
+
+### Added
+
+- Add `pi_query_session` for one-query lead resolution, exact report-local event/call/ancestry provenance, counterexample lookup and selector-bound pagination. Bound complete result serialization to 8 KiB, omit untrusted source text and identifiers, and retain only a bounded private memory index with 15-minute expiry, explicit release, shutdown cleanup and page-source staleness checks.
+- Add deterministic registration-level retrieval, privacy, paging, lifetime, provenance and negative-control regression tests plus synthetic retrieval work/byte measurements; no model/provider efficiency claim.
+
 ### Fixed
 
 - Disclose unsupported or malformed role-specific content blocks without interpreting them as executions, and prevent supplied result IDs from binding internal missing-ID placeholders. Preserve valid sibling blocks, native states and explicit absent-ID legacy joins.

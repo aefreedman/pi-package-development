@@ -11,10 +11,15 @@ export type CorpusParams = {
   maxFiles?: number; maxBytes?: number; maxRecords?: number; maxScanMs?: number;
 };
 export type EventWindow = { since: number; until: number; asOf: number; clock: "message.timestamp then entry.timestamp; Unix milliseconds/explicit timezone" };
-export type CorpusRecord = { entry: any; key: string; time: number | undefined; selected: boolean; duplicate: boolean };
+export type CorpusRecord = { entry: any; key: string; line: number; time: number | undefined; selected: boolean; duplicate: boolean };
+export type SourceFingerprint = { size: number; mtimeMs: number; ctimeMs: number; ino: number; dev: number };
+export function sourceFingerprint(value: SourceFingerprint): SourceFingerprint {
+  return { size: value.size, mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, ino: value.ino, dev: value.dev };
+}
 export type CorpusSource = {
   path: string; sourceId: string; id: string; headerId?: string; parentPath?: string; version?: number;
   format: "native" | "unsupported"; records: CorpusRecord[]; bytes: number;
+  fingerprint?: SourceFingerprint; lineageId?: string;
   malformedLines: number; unsupportedRecords: number; unknownTimestamps: number; unresolvedLineage: number;
   identityConflicts: number; duplicateEvents: number; selectedEvents: number; excludedEvents: number;
   unreadable: boolean; changed: boolean; truncated: boolean; missingIdentity: boolean;
@@ -116,9 +121,10 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
     let lineNumber = 0;
     let first = true;
     const parse = (line: Buffer) => {
+      lineNumber++;
       if (!line.toString("utf8").trim()) return;
       if (coverage.recordsRead >= limits.records) { coverage.stopReason = "record_limit"; return; }
-      coverage.recordsRead++; lineNumber++;
+      coverage.recordsRead++;
       let entry: any;
       try { entry = JSON.parse(line.toString("utf8")); } catch { source.malformedLines++; return; }
       if (first) {
@@ -137,10 +143,11 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       if (typeof entry.id !== "string" || !entry.id || (source.version !== 1 && !(entry.parentId === null || typeof entry.parentId === "string"))) source.unresolvedLineage++;
       const time = eventTime(entry.message?.timestamp) ?? eventTime(entry.timestamp);
       const selected = time !== undefined && time >= window.since && time <= window.until;
-      source.records.push({ entry, key, time, selected, duplicate: false });
+      source.records.push({ entry, key, line: lineNumber, time, selected, duplicate: false });
     };
     try {
       const before = await stat(path);
+      source.fingerprint = sourceFingerprint(before);
       const remainingBytes = limits.bytes - coverage.bytesRead;
       const stream = createReadStream(path, { highWaterMark: Math.min(64 * 1024, remainingBytes), end: remainingBytes - 1 });
       const abort = () => stream.destroy();
@@ -156,7 +163,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
           pending = Buffer.concat([pending, bytes]);
           let end: number;
           while ((end = pending.indexOf(10)) >= 0 && checkpoint()) {
-            if (end > 1024 * 1024) source.unsupportedRecords++; else parse(pending.subarray(0, end));
+            if (end > 1024 * 1024) { lineNumber++; source.unsupportedRecords++; } else parse(pending.subarray(0, end));
             pending = pending.subarray(end + 1);
           }
           if (pending.length > 1024 * 1024) { source.truncated = true; source.unsupportedRecords++; break; }
@@ -167,7 +174,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
         if (checkpoint() && !source.truncated && pending.length) parse(pending);
       } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); stream.destroy(); }
       const after = await stat(path);
-      source.changed = before.size !== after.size || before.mtimeMs !== after.mtimeMs;
+      source.changed = JSON.stringify(source.fingerprint) !== JSON.stringify(sourceFingerprint(after));
       source.truncated ||= source.bytes < before.size || Boolean(coverage.stopReason);
     } catch { if (!checkpoint()) source.truncated = true; else source.unreadable = true; }
     coverage.processedFiles++;
@@ -216,6 +223,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   const seen = new Map<string, Set<string>>();
   let normalized = 0;
   for (const source of selectedSources) {
+    source.lineageId = root(source.sourceId);
     const local = new Map<string, string>();
     for (const record of source.records) {
       if (++normalized % 128 === 0) await yieldTurn();

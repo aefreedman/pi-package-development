@@ -31,8 +31,9 @@ test("registered tool counts exact mirrored/forked calls once and independent id
   assert.equal(report.details.corpus.logicalSessions, 3);
   assert.equal(report.details.corpus.duplicateEvents, 4);
   assert.equal(report.details.analysisStatus, "complete");
-  assert.equal(new Set(report.details.incidents.map(x => x.id)).size, report.details.incidents.length);
-  assert(report.details.incidents.every(incident => report.details.sessionIds.includes(incident.sessionId)));
+  assert.equal(report.details.total, 1, "one unreviewed typed signature across independent repeats");
+  assert.equal(report.details.rows[0].indexedEvents, 2);
+  assert.equal(report.details.rows[0].indexedLineages, 2);
   assert(!JSON.stringify(report).includes(parent), "source provenance paths remain private");
 }));
 
@@ -44,7 +45,7 @@ test("strict supplied ID/name matching, no sibling-branch joins, duplicate call 
   assert.equal(report.details.extraction.unresolvedResults, 4);
   assert.equal(report.details.extraction.unresolvedCalls, 3);
   assert.equal(report.details.analysisStatus, "incomplete");
-  assert.equal(report.details.incidents.length, 0, "unmatched native results cannot invent correlated incidents");
+  assert.equal(report.details.rows.reduce((n, lead) => n + lead.indexedEvents, 0), 3, "unmatched failures are retrievable observations, not attributed incidents");
 }));
 
 test("legal string/image user messages and terminal assistant error/abort states", async () => fixture(async ({ save, run }) => {
@@ -91,8 +92,8 @@ test("event-time context may join across window edges but cannot enter totals or
   assert.equal(report.details.corpus.excludedEvents, 2);
   assert.equal(report.details.extraction.unresolvedCalls, 0);
   assert.equal(report.details.extraction.unresolvedResults, 0);
-  assert.equal(report.details.incidents.length, 0);
-  assert.equal(report.details.latency.byTool.length, 0, "outside-window context is not a timed metric sample");
+  assert.equal(report.details.total, 1, "in-window failed result remains a retrievable observation with marked context");
+  assert.equal(report.details.latency, undefined, "execution latency is not inferred");
   assert.equal(report.details.analysisStatus, "complete");
 }));
 
@@ -102,18 +103,19 @@ test("unknown message formats/time, malformed content and unsupported transcript
   const report = await run();
   assert.equal(report.details.corpus.unknownTimestamps, 1);
   assert.equal(report.details.corpus.unsupportedFiles, 1);
-  assert.equal(report.details.sessionIds.length, 1, "unsupported source is not a logical session");
+  assert.equal(report.details.corpus.logicalSessions, 1, "unsupported source is not a logical session");
   assert.equal(report.details.extraction.unsupportedMessages, 2);
   assert.equal(report.details.analysisStatus, "incomplete");
   assert(!report.content[0].text.includes("Analysis status: complete"));
 }));
 
-test("both native branches are counted without cross-branch failure clustering", async () => fixture(async ({ save, run }) => {
+test("both native branches are counted in an unreviewed signature, not a causal episode", async () => fixture(async ({ save, run }) => {
   await save("session.jsonl", [header("branches"), message("u", null, { role: "user", content: "Synthetic request" }), call("a", "u"), result("ar", "a", "a", { isError: true }), call("b", "u"), result("br", "b", "b", { isError: true })]);
   const report = await run();
   assert.deepEqual(report.details.totals, { toolCalls: 2, failures: 2, userMessages: 1 });
-  assert.equal(report.details.incidents.length, 2);
-  assert(report.details.incidents.every(incident => incident.callCount === 1));
+  assert.equal(report.details.total, 1);
+  assert.equal(report.details.rows[0].indexedEvents, 2);
+  assert.equal(report.details.rows[0].judgment, "unreviewed");
   assert.equal(report.details.analysisStatus, "complete");
 }));
 
@@ -135,31 +137,31 @@ test("supplied null IDs never fall back and repeated executions are not consumed
   assert.equal(report.details.extraction.unresolvedCalls, 0);
   assert.equal(report.details.totals.toolCalls, 2);
   assert.equal(report.details.totals.failures, 2);
-  assert.equal(report.details.incidents.length, 2);
+  assert.equal(report.details.rows[0].indexedEvents, 2);
 }));
 
-test("display caps do not change event or retained-correction accounting", async () => fixture(async ({ save, run }) => {
+test("retired display/correction knobs do not alter event accounting or invent corrections", async () => fixture(async ({ save, run }) => {
   await save("session.jsonl", [header("limits"), ...Array.from({ length: 5 }, (_, i) => message(`u${i}`, i ? `u${i-1}` : null, { role: "user", content: "Do not change the package" }))]);
   const full = await run({ limitCorrections: 100 });
   const hidden = await run({ limitCorrections: 0, limitSessions: 0, limitFailures: 0 });
   assert.deepEqual(full.details.totals, hidden.details.totals);
-  assert.equal(hidden.details.coverage.retainedCorrections, 4);
-  assert.equal(full.details.coverage.retainedCorrections, hidden.details.coverage.retainedCorrections);
+  assert.equal(hidden.details.total, 0, "user-role requests do not establish corrections");
+  assert.equal(full.details.evidenceCoverage.observedEvents, hidden.details.evidenceCoverage.observedEvents);
 }));
 
-test("incident work and report text are bounded without changing accounting", async () => fixture(async ({ save, run }) => {
+test("removing incident inference preserves totals without its former cap; metadata is opaque and bounded", async () => fixture(async ({ save, run }) => {
   const records = [header("inference-cap")];
   for (let i = 0; i < 1001; i++) records.push(call(`c${i}`, i ? `r${i-1}` : null), result(`r${i}`, `c${i}`, `c${i}`));
   const file = await save("session.jsonl", records);
   const report = await run({ session: file });
   assert.equal(report.details.totals.toolCalls, 1001);
-  assert.equal(report.details.extraction.incidentCallsOmitted, 1);
-  assert.equal(report.details.analysisStatus, "incomplete");
+  assert.equal(report.details.evidenceCoverage.omittedEvents, 0);
+  assert.equal(report.details.analysisStatus, "complete");
   const name = "synthetic_tool_" + "x".repeat(60000);
   const large = await save("large.jsonl", [header("output-cap"), call("c", null, "c", name), result("r", "c", "c", { toolName: name })]);
   const bounded = await run({ session: large, reportMode: "full" });
-  assert(bounded.details.outputTruncated);
-  assert(Buffer.byteLength(bounded.content[0].text) < 50 * 1024);
+  assert(!JSON.stringify(bounded).includes(name));
+  assert(Buffer.byteLength(JSON.stringify(bounded)) <= 8192);
   assert.equal(bounded.details.totals.toolCalls, 1);
 }));
 

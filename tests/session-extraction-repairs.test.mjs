@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import register from "../dist/pi/register.js";
 
-let tool;
-register({ on() {}, registerTool(value) { if (value.name === "pi_analyze_session") tool = value; } });
+let tool, query;
+register({ on() {}, registerTool(value) { if (value.name === "pi_analyze_session") tool = value; if (value.name === "pi_query_session") query = value; } });
 const time = Date.parse("2026-01-02T12:00:00Z");
 const entry = (id, parentId, message) => ({ type: "message", id, parentId, timestamp: time, message });
 const text = { type: "text", text: "Synthetic text" };
@@ -19,7 +19,14 @@ async function analyze(records) {
   try {
     const file = join(root, "session.jsonl");
     await writeFile(file, [{ type: "session", version: 3, id: "synthetic-repair", timestamp: time }, ...records].map(record => JSON.stringify(record)).join("\n"));
-    return await tool.execute("synthetic-repair", { session: file, since: "2026-01-02", until: "2026-01-02", asOf: "2026-01-03T00:00:00Z" }, undefined, undefined, { cwd: root });
+    const report = await tool.execute("synthetic-repair", { session: file, since: "2026-01-02", until: "2026-01-02", asOf: "2026-01-03T00:00:00Z" }, undefined, undefined, { cwd: root });
+    report.packets = [];
+    for (const lead of report.details.rows) {
+      const evidence = await query.execute("repair-evidence", { reportRef: report.details.reportRef, leadRef: lead.leadRef }, undefined, undefined, { cwd: root });
+      assert.equal(evidence.details.evidenceCoverage.analysisIncomplete, report.details.analysisStatus === "incomplete");
+      report.packets.push(...evidence.details.rows);
+    }
+    return report;
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
@@ -31,7 +38,7 @@ test("Gate1 B3: unknown user/assistant blocks are incomplete, not inferred execu
   assert.equal(report.details.analysisStatus, "incomplete");
   assert.equal(report.details.extraction.unsupportedMessages, 2);
   assert.deepEqual(report.details.totals, { toolCalls: 0, failures: 0, userMessages: 1 });
-  assert.equal(report.details.incidents.length, 0);
+  assert.equal(report.details.total, 0);
 });
 
 test("Gate1 B4: supplied native ID cannot resolve a fabricated missing-ID placeholder", async () => {
@@ -44,7 +51,8 @@ test("Gate1 B4: supplied native ID cannot resolve a fabricated missing-ID placeh
   assert.equal(report.details.totals.failures, 1, "retain observed native failure, not guessed attribution");
   assert.equal(report.details.extraction.unresolvedCalls, 1);
   assert.equal(report.details.extraction.unresolvedResults, 1);
-  assert.equal(report.details.incidents.length, 0);
+  assert.equal(report.packets[0].join, "unresolved");
+  assert.equal(report.packets[0].call, undefined);
   assert.equal(report.details.analysisStatus, "incomplete");
 });
 
@@ -107,7 +115,8 @@ test("internal-ID lookalikes cannot bind missing-ID calls but genuine supplied l
     ]);
     assert.equal(unmatched.details.extraction.unresolvedCalls, 1, supplied);
     assert.equal(unmatched.details.extraction.unresolvedResults, 1, supplied);
-    assert.equal(unmatched.details.incidents.length, 0, supplied);
+    assert.equal(unmatched.packets[0].join, "unresolved", supplied);
+    assert.equal(unmatched.packets[0].call, undefined, supplied);
     const actual = await analyze([
       entry("c", null, { role: "assistant", content: [missing, call({ id: supplied })] }),
       entry("r", "c", result({ toolCallId: supplied, isError: true })),
@@ -115,7 +124,8 @@ test("internal-ID lookalikes cannot bind missing-ID calls but genuine supplied l
     assert.equal(actual.details.totals.toolCalls, 2, supplied);
     assert.equal(actual.details.extraction.unresolvedCalls, 1, supplied);
     assert.equal(actual.details.extraction.unresolvedResults, 0, supplied);
-    assert.equal(actual.details.incidents.length, 1, "only the genuine native-ID call is attributable: " + supplied);
+    assert.equal(actual.packets[0].join, "native_id_ancestry", supplied);
+    assert.equal(actual.packets[0].call.block, 1, "only the genuine native-ID call is attributable: " + supplied);
   }
 });
 
@@ -127,6 +137,6 @@ test("unambiguous absent-ID legacy correlation remains available and explicitly 
   assert.equal(report.details.extraction.unresolvedResults, 0);
   assert.equal(report.details.extraction.legacyCorrelations, 2);
   assert.equal(report.details.extraction.unsupportedMessages, 0);
-  assert.equal(report.details.incidents.length, 1);
+  assert.equal(report.packets[0].join, "legacy_name_ancestry");
   assert.equal(report.details.analysisStatus, "incomplete");
 });
