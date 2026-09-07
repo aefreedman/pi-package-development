@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Account for native session header identities, exact copied lineage history, unsupported containers, inclusive UTC event windows, and partial coverage with bounded cancellable JSONL scans.
+
 ## 0.4.0 - 2026-08-09
 
 ### Added
