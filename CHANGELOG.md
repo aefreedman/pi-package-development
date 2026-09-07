@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Disclose unsupported or malformed role-specific content blocks without interpreting them as executions, and prevent supplied result IDs from binding internal missing-ID placeholders. Preserve valid sibling blocks, native states and explicit absent-ID legacy joins.
 - Account for native session header identities, exact copied lineage history, unsupported containers, inclusive UTC event windows, and partial coverage with bounded cancellable JSONL scans.
 - Integrate corpus accounting into session analysis, strictly join tool IDs within branch ancestry, support string/image user content and assistant terminal errors/aborts, and separate native/package outcomes from unverified text leads. Unknown formats, outcomes and incomplete joins remain explicit; message timing does not prove execution latency or timeout effects.
 

@@ -231,6 +231,22 @@ function increment(counter: Record<string, number>, key: string, amount = 1): vo
   Object.defineProperty(counter, key, { value: previous + amount, enumerable: true, configurable: true, writable: true });
 }
 
+function supportedContentBlock(role: string, value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const block = value as Record<string, unknown>;
+  switch (block.type) {
+    case "text": return typeof block.text === "string";
+    case "image": return role !== "assistant" && typeof block.data === "string" && typeof block.mimeType === "string";
+    case "thinking": return role === "assistant" && typeof block.thinking === "string";
+    case "toolCall":
+      // Absent IDs are an explicitly incomplete legacy adapter, not valid native IDs.
+      return role === "assistant" && typeof block.name === "string" && block.name.length > 0
+        && Boolean(block.arguments) && typeof block.arguments === "object" && !Array.isArray(block.arguments)
+        && (!Object.hasOwn(block, "id") || (typeof block.id === "string" && block.id.length > 0));
+    default: return false;
+  }
+}
+
 function textFromContent(message: any): string {
   if (typeof message?.content === "string") return message.content;
   const content = Array.isArray(message?.content) ? message.content : [];
@@ -640,7 +656,7 @@ async function analyzeSessionFile(source: CorpusSource, params: SessionAnalysisP
     parents.set(record.key, source.version === 1 && entry.parentId === undefined ? previous : entry.parentId ?? null);
     previous = record.key;
     if (entry.type !== "message") continue;
-    const message = entry.message ?? {};
+    let message = entry.message ?? {};
     const messageTime = record.time ?? Number.NaN;
     const counted = record.selected && !record.duplicate;
     if (!["user", "assistant", "toolResult"].includes(message.role)) {
@@ -651,6 +667,12 @@ async function analyzeSessionFile(source: CorpusSource, params: SessionAnalysisP
     if (!(typeof message.content === "string" && message.role === "user") && !Array.isArray(message.content)) {
       if (!record.duplicate) summary.unsupportedMessages++;
       continue;
+    }
+    if (Array.isArray(message.content)) {
+      const content = message.content.filter((block: unknown) => supportedContentBlock(message.role, block));
+      if (content.length !== message.content.length && !record.duplicate) summary.unsupportedMessages++;
+      // Retain supported siblings and native terminal/result state, never coerce unknown blocks into semantics.
+      message = { ...message, content };
     }
     if (message.role === "user") userOrdinal++;
     if (message.role === "user" && counted) {
@@ -672,15 +694,18 @@ async function analyzeSessionFile(source: CorpusSource, params: SessionAnalysisP
         const name = typeof content.name === "string" ? content.name : "";
         if (!name || !content.arguments || typeof content.arguments !== "object" || Array.isArray(content.arguments)) { if (!record.duplicate) summary.unsupportedMessages++; continue; }
         const rawArgs = content.arguments as Record<string, unknown>;
-        const id = typeof content.id === "string" && content.id ? content.id : `missing-${record.key}-${position}`;
-        if ((typeof content.id !== "string" || !content.id) && !record.duplicate) summary.legacyCorrelations++;
+        const nativeId = typeof content.id === "string" && content.id ? content.id : undefined;
+        const id = `call-${record.key}-${position}`; // Internal event identity, never a native-ID lookup key.
+        if (nativeId === undefined && !record.duplicate) summary.legacyCorrelations++;
         const call: ToolCallEvent = {
           kind: "tool_call", id, sessionId: summary.id, name, packageName: namespaceForTool(name), timestampMs: messageTime,
           arguments: sanitizeValue(rawArgs) as Record<string, unknown>, argumentShape: argumentShape(rawArgs), entryKey: record.key, counted,
         };
         const correlated: CorrelatedCall = { call };
         summary.calls.push(correlated);
-        const ids = callsById.get(id) ?? []; ids.push(correlated); callsById.set(id, ids);
+        if (nativeId !== undefined) {
+          const ids = callsById.get(nativeId) ?? []; ids.push(correlated); callsById.set(nativeId, ids);
+        }
         const pending = pendingByName.get(name) ?? []; pending.push(correlated); pendingByName.set(name, pending);
         if (counted) {
           summary.toolCalls++; increment(summary.tools, name); increment(summary.namespaces, call.packageName);
