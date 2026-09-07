@@ -68,7 +68,7 @@ test("same explicit event window for file, directory, aggregate and header selec
 }));
 
 test("strict UTC boundaries and Unix milliseconds", () => {
-  for (const since of ["bad", "2026-02-30", "2026-01-01T00:00:00", "2026-13-01", ""]) assert.throws(() => eventWindow({ since }));
+  for (const since of ["bad", "2026-02-30", "2026-01-01T00:00:00", "2026-13-01", "2026-01-02T24:00:00Z", ""]) assert.throws(() => eventWindow({ since }));
   assert.throws(() => eventWindow({ since: "2026-02-01", until: "2026-01-01" }));
   assert.throws(() => eventWindow({ days: 0 }));
   assert.equal(eventWindow(bounds).since, Date.parse("2026-01-02T00:00:00Z"));
@@ -106,6 +106,21 @@ test("pre-abort, cooperative abort, byte/record/file/deadline and oversized-line
   assert.equal(oversized.coverage.unsupportedRecords, 1);
 }));
 
+test("cyclic header lineage and legacy entries without event identities remain uncertain", async () => fixture(async (root, save) => {
+  await save("a.jsonl", [header("a", { parentSession: "b.jsonl" }), user("u")]);
+  await save("b.jsonl", [header("b", { parentSession: "a.jsonl" }), user("u")]);
+  const cyclic = await scanSessionCorpus({ session: root, ...bounds }, root);
+  assert.equal(cyclic.coverage.unresolvedLineage, 2);
+  assert.equal(cyclic.coverage.uniqueMessages, 2, "cycles do not prove copied history");
+  assert(corpusIncomplete(cyclic.coverage));
+  const legacy = await save("legacy.jsonl", [header("legacy", { version: 1 }), { type: "message", timestamp: time, message: { role: "user", content: "Synthetic legacy event" } }]);
+  const old = await scanSessionCorpus({ session: legacy, ...bounds }, root);
+  assert.equal(old.coverage.logicalSessions, 1);
+  assert.equal(old.coverage.selectedEvents, 1);
+  assert.equal(old.coverage.unresolvedLineage, 1);
+  assert(corpusIncomplete(old.coverage));
+}));
+
 test("identity conflicts and unreadable inputs never report complete", async () => fixture(async (root, save) => {
   await save("conflict.jsonl", [header("conflict"), user("same"), { ...user("same"), message: { role: "user", content: "Changed synthetic event" } }]);
   const conflict = await scanSessionCorpus({ session: root, ...bounds }, root);
@@ -114,4 +129,7 @@ test("identity conflicts and unreadable inputs never report complete", async () 
   const missing = await scanSessionCorpus({ session: join(root, "missing.jsonl"), ...bounds }, root);
   assert.equal(missing.coverage.unreadableFiles, 1);
   assert(corpusIncomplete(missing.coverage));
+  const filteredMissing = await scanSessionCorpus({ session: join(root, "missing.jsonl"), includeSessionIds: ["wanted"], ...bounds }, root);
+  assert.equal(filteredMissing.coverage.selectionUncertainty, 1);
+  assert(corpusIncomplete(filteredMissing.coverage), "ID filters cannot hide an unreadable source whose identity is unknown");
 }));

@@ -23,8 +23,9 @@ export type CorpusCoverage = {
   discoveredFiles: number; processedFiles: number; logicalSessions: number; unsupportedFiles: number;
   bytesRead: number; recordsRead: number; messageOccurrences: number; uniqueMessages: number;
   selectedEvents: number; excludedEvents: number; unknownTimestamps: number; duplicateEvents: number;
-  unreadableFiles: number; unreadableDirectories: number; changedFiles: number; unresolvedLineage: number;
+  unreadableFiles: number; unreadableDirectories: number; changedFiles: number; truncatedFiles: number; unresolvedLineage: number;
   identityConflicts: number; unsupportedRecords: number; malformedLines: number; missingIdentities: number;
+  selectionUncertainty: number; observedFirst?: number; observedLast?: number;
   discoveryComplete: boolean; stopReason?: "cancelled" | "deadline" | "file_limit" | "byte_limit" | "record_limit" | "directory_limit";
 };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -33,7 +34,7 @@ const canonicalPath = (text: string) => process.platform === "win32" ? resolve(t
 
 function boundary(value: string, end = false): number {
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
-  if (!dateOnly && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error("Date bounds require YYYY-MM-DD (UTC) or an ISO timestamp with timezone.");
+  if (!dateOnly && !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error("Date bounds require YYYY-MM-DD (UTC) or an ISO timestamp with timezone.");
   const parsed = Date.parse(dateOnly ? `${value}T${end ? "23:59:59.999" : "00:00:00.000"}Z` : value);
   // Date.parse normalizes invalid calendar days; reject those rather than silently changing the window.
   const day = value.slice(0, 10);
@@ -64,7 +65,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   const window = eventWindow(params);
   const limits = { files: budget(params.maxFiles, 1000, 5000), bytes: budget(params.maxBytes, 32 * 1024 * 1024, 128 * 1024 * 1024), records: budget(params.maxRecords, 20000, 100000), ms: budget(params.maxScanMs, 30000, 120000) };
   const deadline = Date.now() + limits.ms;
-  const coverage: CorpusCoverage = { discoveredFiles: 0, processedFiles: 0, logicalSessions: 0, unsupportedFiles: 0, bytesRead: 0, recordsRead: 0, messageOccurrences: 0, uniqueMessages: 0, selectedEvents: 0, excludedEvents: 0, unknownTimestamps: 0, duplicateEvents: 0, unreadableFiles: 0, unreadableDirectories: 0, changedFiles: 0, unresolvedLineage: 0, identityConflicts: 0, unsupportedRecords: 0, malformedLines: 0, missingIdentities: 0, discoveryComplete: false };
+  const coverage: CorpusCoverage = { discoveredFiles: 0, processedFiles: 0, logicalSessions: 0, unsupportedFiles: 0, bytesRead: 0, recordsRead: 0, messageOccurrences: 0, uniqueMessages: 0, selectedEvents: 0, excludedEvents: 0, unknownTimestamps: 0, duplicateEvents: 0, unreadableFiles: 0, unreadableDirectories: 0, changedFiles: 0, truncatedFiles: 0, unresolvedLineage: 0, identityConflicts: 0, unsupportedRecords: 0, malformedLines: 0, missingIdentities: 0, selectionUncertainty: 0, discoveryComplete: false };
   const checkpoint = () => {
     if (signal?.aborted) coverage.stopReason = "cancelled";
     else if (!coverage.stopReason && Date.now() >= deadline) coverage.stopReason = "deadline";
@@ -105,9 +106,11 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   const discoveryStop = coverage.stopReason;
   if (discoveryStop === "file_limit" || discoveryStop === "directory_limit") delete coverage.stopReason;
   const sources: CorpusSource[] = [];
+  let lastProgress = Number.NEGATIVE_INFINITY;
   const knownMetadata = new Set(["session_info", "model_change", "thinking_level_change", "compaction", "branch_summary", "custom", "custom_message", "label"]);
   for (const path of files.sort()) {
     if (!checkpoint()) break;
+    if (coverage.bytesRead >= limits.bytes) { coverage.stopReason = "byte_limit"; break; }
     const source: CorpusSource = { path, sourceId: `source-${hash(canonicalPath(path))}`, id: `source-${hash(canonicalPath(path))}`, format: "unsupported", records: [], bytes: 0, malformedLines: 0, unsupportedRecords: 0, unknownTimestamps: 0, unresolvedLineage: 0, identityConflicts: 0, duplicateEvents: 0, selectedEvents: 0, excludedEvents: 0, unreadable: false, changed: false, truncated: false, missingIdentity: false };
     sources.push(source);
     let lineNumber = 0;
@@ -131,14 +134,15 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       if (source.format !== "native") { source.unsupportedRecords++; return; }
       if (!entry || typeof entry !== "object" || Array.isArray(entry) || (entry.type !== "message" && !knownMetadata.has(entry.type))) { source.unsupportedRecords++; return; }
       const key = typeof entry.id === "string" && entry.id ? entry.id : `line-${lineNumber}`;
-      if (source.version !== 1 && (typeof entry.id !== "string" || !(entry.parentId === null || typeof entry.parentId === "string"))) source.unresolvedLineage++;
+      if (typeof entry.id !== "string" || !entry.id || (source.version !== 1 && !(entry.parentId === null || typeof entry.parentId === "string"))) source.unresolvedLineage++;
       const time = eventTime(entry.message?.timestamp) ?? eventTime(entry.timestamp);
       const selected = time !== undefined && time >= window.since && time <= window.until;
       source.records.push({ entry, key, time, selected, duplicate: false });
     };
     try {
       const before = await stat(path);
-      const stream = createReadStream(path, { highWaterMark: 64 * 1024 });
+      const remainingBytes = limits.bytes - coverage.bytesRead;
+      const stream = createReadStream(path, { highWaterMark: Math.min(64 * 1024, remainingBytes), end: remainingBytes - 1 });
       const abort = () => stream.destroy();
       signal?.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => { coverage.stopReason ??= "deadline"; stream.destroy(); }, Math.max(1, deadline - Date.now()));
@@ -156,7 +160,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
             pending = pending.subarray(end + 1);
           }
           if (pending.length > 1024 * 1024) { source.truncated = true; source.unsupportedRecords++; break; }
-          progress?.(sources.length, coverage.bytesRead);
+          if (Date.now() - lastProgress >= 250) { progress?.(sources.length, coverage.bytesRead); lastProgress = Date.now(); }
           await yieldTurn();
           if (bytes.length < (chunk as Buffer).length || (coverage.bytesRead >= limits.bytes && source.bytes < before.size)) { coverage.stopReason = "byte_limit"; break; }
         }
@@ -177,7 +181,11 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
     if (params.includeSessionIds?.length && !params.includeSessionIds.some(id => identities.includes(id))) return false;
     return !params.excludeSessionIds?.some(id => identities.includes(id));
   });
-  if (!explicitPath && !aggregate && !selectedSources.length && !coverage.stopReason) throw new Error("No native header identity or filename matched the requested session.");
+  const selectedSet = new Set(selectedSources);
+  coverage.selectionUncertainty = sources.filter(source => !selectedSet.has(source)
+    && !params.excludeSessionIds?.includes(source.sourceId)
+    && (!source.headerId || source.unreadable || source.changed || source.truncated)).length;
+  if (!explicitPath && !aggregate && !selectedSources.length && !coverage.stopReason && !coverage.selectionUncertainty) throw new Error("No native header identity or filename matched the requested session.");
   const byPath = new Map(selectedSources.map(source => [canonicalPath(source.path), source]));
   // Union only proven parent links and identical native header identities, never argument similarity.
   const groups = new Map(selectedSources.map(source => [source.sourceId, source.sourceId]));
@@ -186,18 +194,38 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   const headers = new Map<string, CorpusSource>();
   for (const source of selectedSources) {
     if (source.headerId) { const other = headers.get(source.headerId); if (other) merge(source, other); else headers.set(source.headerId, source); }
-    if (source.parentPath) { const parent = byPath.get(source.parentPath); if (parent?.format === "native") merge(source, parent); else source.unresolvedLineage++; }
+    if (source.parentPath) {
+      const parent = byPath.get(source.parentPath);
+      const ancestry = new Set([canonicalPath(source.path)]);
+      let next = parent;
+      let cycle = false;
+      while (next) {
+        if (signal?.aborted || Date.now() >= deadline) { cycle = true; break; }
+        const path = canonicalPath(next.path);
+        if (ancestry.has(path)) { cycle = true; break; }
+        ancestry.add(path); next = next.parentPath ? byPath.get(next.parentPath) : undefined;
+      }
+      if (parent?.format === "native" && !cycle) merge(source, parent); else source.unresolvedLineage++;
+    }
   }
+  const continueAnalysis = () => {
+    if (signal?.aborted) { coverage.stopReason = "cancelled"; return false; }
+    if (Date.now() >= deadline) { coverage.stopReason = "deadline"; return false; }
+    return true;
+  };
   const seen = new Map<string, Set<string>>();
+  let normalized = 0;
   for (const source of selectedSources) {
     const local = new Map<string, string>();
     for (const record of source.records) {
+      if (++normalized % 128 === 0) await yieldTurn();
+      if (!continueAnalysis()) { source.truncated = true; break; }
       const entry = record.entry;
       const digest = hash(JSON.stringify(entry));
       const eventId = `${root(source.sourceId)}:${record.key}`;
       const fingerprints = seen.get(eventId) ?? new Set<string>();
       // Missing v1 IDs cannot establish copied-history provenance.
-      record.duplicate = typeof entry.id === "string" && fingerprints.has(digest);
+      record.duplicate = typeof entry.id === "string" && Boolean(entry.id) && fingerprints.has(digest);
       if (fingerprints.size && !fingerprints.has(digest)) source.identityConflicts++;
       fingerprints.add(digest); seen.set(eventId, fingerprints);
       if (local.has(record.key) && local.get(record.key) !== digest) source.identityConflicts++;
@@ -208,17 +236,20 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       if (record.duplicate) { source.duplicateEvents++; continue; }
       coverage.uniqueMessages++;
       if (record.time === undefined) source.unknownTimestamps++;
-      else if (record.selected) source.selectedEvents++;
-      else source.excludedEvents++;
+      else {
+        coverage.observedFirst = Math.min(coverage.observedFirst ?? record.time, record.time);
+        coverage.observedLast = Math.max(coverage.observedLast ?? record.time, record.time);
+        if (record.selected) source.selectedEvents++; else source.excludedEvents++;
+      }
     }
     coverage.unsupportedFiles += Number(source.format === "unsupported");
-    coverage.unreadableFiles += Number(source.unreadable); coverage.changedFiles += Number(source.changed);
+    coverage.unreadableFiles += Number(source.unreadable); coverage.changedFiles += Number(source.changed); coverage.truncatedFiles += Number(source.truncated);
     coverage.missingIdentities += Number(source.missingIdentity);
     for (const key of ["selectedEvents", "excludedEvents", "unknownTimestamps", "duplicateEvents", "unresolvedLineage", "identityConflicts", "unsupportedRecords", "malformedLines"] as const) coverage[key] += source[key];
   }
   coverage.logicalSessions = new Set(selectedSources.filter(source => source.format === "native").map(source => source.id)).size;
-  return { sources: selectedSources, coverage, window, limits, checkpoint };
+  return { sources: selectedSources, coverage, window, limits, continueAnalysis };
 }
 export function corpusIncomplete(coverage: CorpusCoverage): boolean {
-  return Boolean(coverage.stopReason || !coverage.discoveryComplete || coverage.unsupportedFiles || coverage.unreadableFiles || coverage.changedFiles || coverage.unresolvedLineage || coverage.identityConflicts || coverage.unsupportedRecords || coverage.malformedLines || coverage.missingIdentities || coverage.unknownTimestamps);
+  return Boolean(coverage.stopReason || !coverage.discoveryComplete || coverage.unsupportedFiles || coverage.unreadableFiles || coverage.changedFiles || coverage.truncatedFiles || coverage.unresolvedLineage || coverage.identityConflicts || coverage.unsupportedRecords || coverage.malformedLines || coverage.missingIdentities || coverage.unknownTimestamps || coverage.selectionUncertainty);
 }

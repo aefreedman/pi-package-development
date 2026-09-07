@@ -12,6 +12,9 @@ registerPackageDevelopment({
   },
 });
 assert(registeredTool, "Expected pi_analyze_session tool to register.");
+// Historical fixture time is explicit; never depend on checkout mtime or today's wall clock.
+const execute = registeredTool.execute.bind(registeredTool);
+registeredTool.execute = (id, params, ...rest) => execute(id, { since: "2023-11-01", until: "2023-12-31", asOf: "2024-01-01T00:00:00Z", ...params }, ...rest);
 
 const fixtureRoot = new URL("fixtures/session-analysis/", import.meta.url).pathname.replace(/^\/(?:[A-Za-z]:)/, (value) => value.slice(1));
 const result = await registeredTool.execute("fixture-analysis", {
