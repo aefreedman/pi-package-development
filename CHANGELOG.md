@@ -4,6 +4,10 @@
 
 ## 0.5.0 - 2026-09-10
 
+### Security
+
+- Update the development/test Pi baseline to 0.85.1 and refresh the lockfile to resolve patched `brace-expansion` 5.0.9 and `undici` 8.9.0. Consumer-managed Pi hosts must be updated separately; peer compatibility ranges are unchanged.
+
 ### Changed
 
 - Replace diagnostic session ranking, inferred recovery/concurrency/corrections and source-marker “fixed” claims with unreviewed typed-signature leads. Preserve selection/time/native-call accounting; intentionally retire diagnostic knobs and outputs in evidence schema 2, with resume argument compatibility documented.
