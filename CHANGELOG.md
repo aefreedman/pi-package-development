@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-10
+
 ### Changed
 
 - Replace diagnostic session ranking, inferred recovery/concurrency/corrections and source-marker “fixed” claims with unreviewed typed-signature leads. Preserve selection/time/native-call accounting; intentionally retire diagnostic knobs and outputs in evidence schema 2, with resume argument compatibility documented.
