@@ -38,6 +38,15 @@ export type CorpusCoverage = {
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const homePath = (text: string) => text.replace(/^@/, "").replace(/^~(?=[/\\]|$)/, homedir());
 const canonicalPath = (text: string) => process.platform === "win32" ? resolve(text).toLowerCase() : resolve(text);
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = left[Symbol.iterator](); const rightPoints = right[Symbol.iterator]();
+  for (;;) {
+    const a = leftPoints.next(); const b = rightPoints.next();
+    if (a.done || b.done) return a.done === b.done ? 0 : a.done ? -1 : 1;
+    const difference = a.value.codePointAt(0)! - b.value.codePointAt(0)!;
+    if (difference) return difference;
+  }
+}
 
 function boundary(value: string, end = false): number {
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -83,7 +92,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   };
   type Candidate = { path: string; mtimeMs: number; canonical: string };
   const admitted: Candidate[] = [];
-  const compareCandidates = (left: Candidate, right: Candidate) => (right.mtimeMs - left.mtimeMs) || (left.canonical < right.canonical ? -1 : left.canonical > right.canonical ? 1 : 0);
+  const compareCandidates = (left: Candidate, right: Candidate) => (right.mtimeMs - left.mtimeMs) || compareCodePoints(left.canonical, right.canonical);
   const admit = (candidate: Candidate) => {
     admitted.push(candidate); admitted.sort(compareCandidates);
     if (admitted.length > limits.files) { admitted.pop(); coverage.candidatesOmitted++; }
@@ -102,7 +111,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
         const directory = await opendir(path);
         const entries = [];
         for await (const entry of directory) entries.push(entry);
-        entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+        entries.sort((left, right) => compareCodePoints(left.name, right.name));
         for (const entry of entries) {
           if (!discoveryCheckpoint()) break;
           if (++coverage.entriesVisited > 100000) { discoveryStop = "directory_limit"; break; }
@@ -279,7 +288,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   const seen = new Map<string, Set<string>>();
   let normalized = 0;
   // Read scheduling is mtime-ranked; normalize identity ownership by canonical path so a newer fork cannot claim copied history.
-  for (const source of [...selectedSources].sort((left, right) => canonicalPath(left.path) < canonicalPath(right.path) ? -1 : canonicalPath(left.path) > canonicalPath(right.path) ? 1 : 0)) {
+  for (const source of [...selectedSources].sort((left, right) => compareCodePoints(canonicalPath(left.path), canonicalPath(right.path)))) {
     source.lineageId = root(source.sourceId);
     const local = new Map<string, string>();
     for (const record of source.records) {

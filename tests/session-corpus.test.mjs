@@ -127,6 +127,9 @@ test("bounded discovery admits the newest observed candidates, not traversal ord
   assert(corpusIncomplete(result.coverage), "unadmitted observed candidates remain explicit coverage omissions");
   const ordered = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 2 }, root);
   assert.deepEqual(ordered.sources.map(source => source.headerId), ["recent", "old"], "processing follows the deterministic admission ranking");
+  await utimes(old, new Date(3), new Date(3)); await utimes(recent, new Date(3), new Date(3));
+  const tied = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 1 }, root);
+  assert.equal(tied.sources[0].headerId, "old", "canonical paths break equal-mtime admission ties deterministically");
 }));
 
 test("oversized records discard through LF and resume with exact line locators", async () => fixture(async (root, save) => {
