@@ -12,6 +12,9 @@ export type CorpusParams = {
 };
 export type EventWindow = { since: number; until: number; asOf: number; clock: "message.timestamp then entry.timestamp; Unix milliseconds/explicit timezone" };
 export type CorpusRecord = { entry: any; key: string; line: number; time: number | undefined; selected: boolean; duplicate: boolean };
+type CorpusDirectoryEntry = { name: string; isDirectory(): boolean; isFile(): boolean };
+type CorpusDirectory = AsyncIterable<CorpusDirectoryEntry>;
+export type CorpusDiscoveryFilesystem = { opendir(path: string): Promise<CorpusDirectory>; stat(path: string): Promise<{ mtimeMs: number }> };
 export type SourceFingerprint = { size: number; mtimeMs: number; ctimeMs: number; ino: number; dev: number };
 export function sourceFingerprint(value: SourceFingerprint): SourceFingerprint {
   return { size: value.size, mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, ino: value.ino, dev: value.dev };
@@ -77,7 +80,7 @@ function budget(value: number | undefined, fallback: number, maximum: number): n
   if (!Number.isSafeInteger(result) || result < 1 || result > maximum) throw new Error(`Scan budgets must be positive integers no larger than ${maximum}.`);
   return result;
 }
-export async function scanSessionCorpus(params: CorpusParams, cwd: string, signal?: AbortSignal, progress?: (files: number, bytes: number) => void) {
+export async function scanSessionCorpus(params: CorpusParams, cwd: string, signal?: AbortSignal, progress?: (files: number, bytes: number) => void, discoveryFilesystem: CorpusDiscoveryFilesystem = { opendir, stat }) {
   const window = eventWindow(params);
   const limits = { files: budget(params.maxFiles, 1000, 5000), bytes: budget(params.maxBytes, 32 * 1024 * 1024, 128 * 1024 * 1024), records: budget(params.maxRecords, 20000, 100000), ms: budget(params.maxScanMs, 30000, 120000) };
   const started = Date.now();
@@ -108,11 +111,9 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
     for (let index = 0; index < directories.length && discoveryCheckpoint(); index++) {
       const path = directories[index]!;
       try {
-        const directory = await opendir(path);
-        const entries = [];
-        for await (const entry of directory) entries.push(entry);
-        entries.sort((left, right) => compareCodePoints(left.name, right.name));
-        for (const entry of entries) {
+        const directory = await discoveryFilesystem.opendir(path);
+        for await (const entry of directory) {
+          // The iterator itself can be slow or huge. Check before retaining any additional metadata.
           if (!discoveryCheckpoint()) break;
           if (++coverage.entriesVisited > 100000) { discoveryStop = "directory_limit"; break; }
           const full = join(path, entry.name);
@@ -121,7 +122,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
             directories.push(full);
           } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
             coverage.candidatesSeen++;
-            try { admit({ path: full, mtimeMs: (await stat(full)).mtimeMs, canonical: canonicalPath(full) }); }
+            try { admit({ path: full, mtimeMs: (await discoveryFilesystem.stat(full)).mtimeMs, canonical: canonicalPath(full) }); }
             catch { coverage.candidatesOmitted++; coverage.unreadableDirectories++; }
           }
           // Symlinks are deliberately not followed (no cycles or implicit scope expansion).

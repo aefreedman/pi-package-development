@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mkdtemp, writeFile, rm, utimes } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, stat, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { scanSessionCorpus, corpusIncomplete, eventWindow } from "../dist/pi/session-corpus.js";
@@ -130,6 +130,54 @@ test("bounded discovery admits the newest observed candidates, not traversal ord
   await utimes(old, new Date(3), new Date(3)); await utimes(recent, new Date(3), new Date(3));
   const tied = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 1 }, root);
   assert.equal(tied.sources[0].headerId, "old", "canonical paths break equal-mtime admission ties deterministically");
+}));
+
+test("streaming discovery checks limits, deadline and cancellation while enumerating", async () => fixture(async (root, save) => {
+  const old = await save("old.jsonl", [header("old"), user("old")]);
+  const recent = await save("recent.jsonl", [header("recent"), user("recent")]);
+  await utimes(old, new Date(1), new Date(1)); await utimes(recent, new Date(2), new Date(2));
+  const file = (name) => ({ name, isDirectory: () => false, isFile: () => true });
+  const other = (name) => ({ name, isDirectory: () => false, isFile: () => true });
+  let yielded = 0; let closed = false;
+  async function* hugeDirectory() {
+    try {
+      for (const name of ["old.jsonl", "recent.jsonl"]) { yielded++; yield file(name); }
+      for (;;) { yielded++; yield other(`unbounded-${yielded}.tmp`); }
+    } finally { closed = true; }
+  }
+  const limited = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 1 }, root, undefined, undefined, { opendir: async () => hugeDirectory(), stat });
+  assert.equal(limited.coverage.stopReason, "directory_limit");
+  assert.equal(limited.coverage.entriesVisited, 100001, "entry limit is enforced during iterator consumption");
+  assert.equal(yielded, 100001, "the iterator is not fully materialized before the limit");
+  assert(closed, "breaking bounded enumeration closes the iterator");
+  assert.equal(limited.sources[0].headerId, "recent", "admitted content still uses reserved scan time");
+  assert.equal(limited.coverage.selectedEvents, 1);
+  assert(corpusIncomplete(limited.coverage));
+
+  let clock = 0; closed = false;
+  const originalNow = Date.now;
+  async function* slowDirectory() {
+    try { yielded = 1; yield file("recent.jsonl"); clock = 26; yielded++; yield other("late.tmp"); } finally { closed = true; }
+  }
+  try {
+    Date.now = () => clock;
+    const timed = await scanSessionCorpus({ session: root, ...bounds, maxScanMs: 100 }, root, undefined, undefined, { opendir: async () => slowDirectory(), stat });
+    assert.equal(timed.coverage.stopReason, "discovery_deadline");
+    assert.equal(timed.coverage.entriesVisited, 1, "deadline is checked before accepting the next yielded entry");
+    assert(closed); assert.equal(timed.coverage.selectedEvents, 1);
+    assert(corpusIncomplete(timed.coverage));
+  } finally { Date.now = originalNow; }
+
+  const abort = new AbortController(); closed = false;
+  async function* cancelledDirectory() {
+    try { yield file("recent.jsonl"); await Promise.resolve(); abort.abort(); yield other("after-cancel.tmp"); } finally { closed = true; }
+  }
+  const cancelled = await scanSessionCorpus({ session: root, ...bounds }, root, abort.signal, undefined, { opendir: async () => cancelledDirectory(), stat });
+  assert.equal(cancelled.coverage.stopReason, "cancelled");
+  assert.equal(cancelled.coverage.entriesVisited, 1, "cancellation stops enumeration before the next entry is retained");
+  assert(closed); assert.equal(cancelled.coverage.discoveredFiles, 1);
+  assert.equal(cancelled.coverage.processedFiles, 0);
+  assert(corpusIncomplete(cancelled.coverage));
 }));
 
 test("oversized records discard through LF and resume with exact line locators", async () => fixture(async (root, save) => {

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Prioritize bounded recent-session scan candidates by observed file mtime while disclosing partial metadata discovery; event timestamps remain the only event-selection clock.
+- Prioritize bounded recent-session scan candidates by observed file mtime while checking entry, deadline and cancellation bounds during streaming directory enumeration. Event timestamps remain the only event-selection clock; partial metadata traversal ranks only its observed subset and does not promise global deterministic newest-file coverage.
 - Discard oversized JSONL records without retaining their bodies, resume at the next line, preserve physical locators, and disclose oversized-record omissions (also counted in unsupported records; do not sum those counters).
 
 ## 0.5.0 - 2026-09-10
