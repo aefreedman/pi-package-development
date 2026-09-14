@@ -244,9 +244,12 @@ test("cross-window/fork/mirror provenance preserves native identity and strict u
   const left = Date.parse("2026-01-02T00:00:00Z");
   const shared = pair("1", null); shared[0].timestamp = left - 1; shared[1].timestamp = left;
   const parent = await save("a.jsonl", [header("parent"), ...shared]);
-  await save("b.jsonl", [header("parent"), ...shared]);
-  await save("c.jsonl", [header("fork", { parentSession: parent }), ...shared, ...pair("2", "r1")]);
-  await save("d.jsonl", [header("independent"), ...shared]);
+  const mirror = await save("b.jsonl", [header("parent"), ...shared]);
+  const fork = await save("c.jsonl", [header("fork", { parentSession: parent }), ...shared, ...pair("2", "r1")]);
+  const independent = await save("d.jsonl", [header("independent"), ...shared]);
+  // Force a reversed read schedule: copied history still belongs to the canonical source, not the newest fork.
+  await utimes(parent, new Date(1), new Date(1)); await utimes(mirror, new Date(2), new Date(2));
+  await utimes(fork, new Date(4), new Date(4)); await utimes(independent, new Date(3), new Date(3));
   const report = await scan(); assert.equal(report.details.totals.failures, 3); assert.equal(report.details.rows[0].indexedLineages, 2);
   let page = await query(report, { leadRef: report.details.rows[0].leadRef, limit: 10 }); const events = [...page.details.rows];
   while (page.details.nextCursor) { page = await query(report, { leadRef: report.details.rows[0].leadRef, cursor: page.details.nextCursor, limit: 10 }); events.push(...page.details.rows); }

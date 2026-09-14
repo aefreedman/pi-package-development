@@ -278,7 +278,8 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   };
   const seen = new Map<string, Set<string>>();
   let normalized = 0;
-  for (const source of selectedSources) {
+  // Read scheduling is mtime-ranked; normalize identity ownership by canonical path so a newer fork cannot claim copied history.
+  for (const source of [...selectedSources].sort((left, right) => canonicalPath(left.path) < canonicalPath(right.path) ? -1 : canonicalPath(left.path) > canonicalPath(right.path) ? 1 : 0)) {
     source.lineageId = root(source.sourceId);
     const local = new Map<string, string>();
     for (const record of source.records) {
