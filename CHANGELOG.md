@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-09-14
+
 ### Fixed
 
 - Prioritize bounded recent-session scan candidates by observed file mtime while checking entry, deadline and cancellation bounds during streaming directory enumeration. Event timestamps remain the only event-selection clock; partial metadata traversal ranks only its observed subset and does not promise global deterministic newest-file coverage.
