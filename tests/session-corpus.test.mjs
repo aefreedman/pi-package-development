@@ -86,13 +86,19 @@ test("pre-abort, cooperative abort, byte/record/file/deadline and oversized-line
   const mid = await scanSessionCorpus({ session: root, ...bounds }, root, during.signal, () => during.abort());
   assert.equal(mid.coverage.stopReason, "cancelled");
   assert(mid.coverage.bytesRead <= 65536);
-  for (const [budget, stopReason] of [[{ maxBytes: 200 }, "byte_limit"], [{ maxRecords: 3 }, "record_limit"], [{ maxFiles: 1 }, "file_limit"]]) {
+  for (const [budget, stopReason] of [[{ maxBytes: 200 }, "byte_limit"], [{ maxRecords: 3 }, "record_limit"]]) {
     const result = await scanSessionCorpus({ session: root, ...bounds, ...budget }, root);
     assert.equal(result.coverage.stopReason, stopReason);
     assert(corpusIncomplete(result.coverage));
     if (budget.maxBytes) assert.equal(result.coverage.bytesRead, budget.maxBytes);
     if (budget.maxRecords) assert.equal(result.coverage.recordsRead, budget.maxRecords);
   }
+  const admitted = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 1 }, root);
+  assert.equal(admitted.coverage.discoveredFiles, 1);
+  assert.equal(admitted.coverage.candidatesSeen, 2);
+  assert.equal(admitted.coverage.candidatesOmitted, 1);
+  assert.equal(admitted.coverage.stopReason, undefined);
+  assert(corpusIncomplete(admitted.coverage));
   const originalNow = Date.now;
   let clock = 0;
   try {
@@ -104,6 +110,48 @@ test("pre-abort, cooperative abort, byte/record/file/deadline and oversized-line
   const oversized = await scanSessionCorpus({ session: giant, ...bounds }, root);
   assert(corpusIncomplete(oversized.coverage));
   assert.equal(oversized.coverage.unsupportedRecords, 1);
+}));
+
+test("bounded discovery admits the newest observed candidates, not traversal order", async () => fixture(async (root, save) => {
+  const old = await save("a-old.jsonl", [header("old"), user("old")]);
+  const nested = join(root, "nested");
+  await (await import("node:fs/promises")).mkdir(nested);
+  const recent = await save("nested/z-recent.jsonl", [header("recent"), user("recent")]);
+  await utimes(old, new Date(1), new Date(1)); await utimes(recent, new Date(2_000_000), new Date(2_000_000));
+  const result = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 1 }, root);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].headerId, "recent", "admission, not only processing order, favors the recent candidate");
+  assert.equal(result.coverage.entriesVisited, 3);
+  assert.equal(result.coverage.candidatesSeen, 2);
+  assert.equal(result.coverage.candidatesOmitted, 1);
+  assert(corpusIncomplete(result.coverage), "unadmitted observed candidates remain explicit coverage omissions");
+  const ordered = await scanSessionCorpus({ session: root, ...bounds, maxFiles: 2 }, root);
+  assert.deepEqual(ordered.sources.map(source => source.headerId), ["recent", "old"], "processing follows the deterministic admission ranking");
+}));
+
+test("oversized records discard through LF and resume with exact line locators", async () => fixture(async (root, save) => {
+  const giant = JSON.stringify({ type: "message", id: "giant", parentId: null, timestamp: time, message: { role: "user", content: "x".repeat(1024 * 1024 + 1) } });
+  const file = await save("resume.jsonl", [header("resume"), giant, user("after", null)]);
+  const result = await scanSessionCorpus({ session: file, ...bounds }, root);
+  assert.equal(result.coverage.oversizedRecords, 1);
+  assert.equal(result.coverage.unsupportedRecords, 1, "oversized records overlap unsupported-record omissions");
+  assert.equal(result.coverage.recordsRead, 3, "the discarded nonblank line consumes one record attempt");
+  assert.equal(result.sources[0].records[0].line, 3, "later records retain physical JSONL line numbers");
+  assert.equal(result.coverage.selectedEvents, 1);
+  const eof = await save("eof.jsonl", [header("eof"), giant]);
+  const atEof = await scanSessionCorpus({ session: eof, ...bounds }, root);
+  assert.equal(atEof.coverage.oversizedRecords, 1, "an oversized actual EOF record is an omission, not a truncated suffix");
+  const threshold = await save("threshold.jsonl", [header("threshold"), "x".repeat(1024 * 1024 - 1), "x".repeat(1024 * 1024), "x".repeat(1024 * 1024 + 1)]);
+  const thresholdResult = await scanSessionCorpus({ session: threshold, ...bounds }, root);
+  assert.equal(thresholdResult.coverage.oversizedRecords, 1, "only records strictly over the 1 MiB limit are discarded");
+  const unicode = JSON.stringify({ type: "message", id: "unicode", parentId: null, timestamp: time, message: { role: "user", content: "\u3042".repeat(400000) } }) + "\r";
+  const crlf = await save("crlf.jsonl", [header("crlf"), unicode, user("after-crlf", null)]);
+  const crlfResult = await scanSessionCorpus({ session: crlf, ...bounds }, root);
+  assert.equal(crlfResult.coverage.oversizedRecords, 1);
+  assert.equal(crlfResult.sources[0].records[0].line, 3, "CRLF and UTF-8 discard framing resumes at the next physical line");
+  const cutoff = await scanSessionCorpus({ session: file, ...bounds, maxBytes: 200 }, root);
+  assert.equal(cutoff.coverage.oversizedRecords, 0, "a byte-cutoff suffix is never parsed as a complete record");
+  assert.equal(cutoff.coverage.stopReason, "byte_limit");
 }));
 
 test("cyclic header lineage and legacy entries without event identities remain uncertain", async () => fixture(async (root, save) => {

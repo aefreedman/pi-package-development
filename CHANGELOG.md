@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Prioritize bounded recent-session scan candidates by observed file mtime while disclosing partial metadata discovery; event timestamps remain the only event-selection clock.
+- Discard oversized JSONL records without retaining their bodies, resume at the next line, preserve physical locators, and disclose oversized-record omissions (also counted in unsupported records; do not sum those counters).
+
 ## 0.5.0 - 2026-09-10
 
 ### Security

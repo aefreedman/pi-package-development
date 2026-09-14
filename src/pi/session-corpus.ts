@@ -22,16 +22,18 @@ export type CorpusSource = {
   fingerprint?: SourceFingerprint; lineageId?: string;
   malformedLines: number; unsupportedRecords: number; unknownTimestamps: number; unresolvedLineage: number;
   identityConflicts: number; duplicateEvents: number; selectedEvents: number; excludedEvents: number;
+  oversizedRecords: number;
   unreadable: boolean; changed: boolean; truncated: boolean; missingIdentity: boolean;
 };
 export type CorpusCoverage = {
   discoveredFiles: number; processedFiles: number; logicalSessions: number; unsupportedFiles: number;
+  entriesVisited: number; candidatesSeen: number; candidatesOmitted: number;
   bytesRead: number; recordsRead: number; messageOccurrences: number; uniqueMessages: number;
   selectedEvents: number; excludedEvents: number; unknownTimestamps: number; duplicateEvents: number;
   unreadableFiles: number; unreadableDirectories: number; changedFiles: number; truncatedFiles: number; unresolvedLineage: number;
-  identityConflicts: number; unsupportedRecords: number; malformedLines: number; missingIdentities: number;
+  identityConflicts: number; unsupportedRecords: number; oversizedRecords: number; malformedLines: number; missingIdentities: number;
   selectionUncertainty: number; observedFirst?: number; observedLast?: number;
-  discoveryComplete: boolean; stopReason?: "cancelled" | "deadline" | "file_limit" | "byte_limit" | "record_limit" | "directory_limit";
+  discoveryComplete: boolean; stopReason?: "cancelled" | "deadline" | "byte_limit" | "record_limit" | "directory_limit" | "discovery_deadline";
 };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const homePath = (text: string) => text.replace(/^@/, "").replace(/^~(?=[/\\]|$)/, homedir());
@@ -69,66 +71,93 @@ function budget(value: number | undefined, fallback: number, maximum: number): n
 export async function scanSessionCorpus(params: CorpusParams, cwd: string, signal?: AbortSignal, progress?: (files: number, bytes: number) => void) {
   const window = eventWindow(params);
   const limits = { files: budget(params.maxFiles, 1000, 5000), bytes: budget(params.maxBytes, 32 * 1024 * 1024, 128 * 1024 * 1024), records: budget(params.maxRecords, 20000, 100000), ms: budget(params.maxScanMs, 30000, 120000) };
-  const deadline = Date.now() + limits.ms;
-  const coverage: CorpusCoverage = { discoveredFiles: 0, processedFiles: 0, logicalSessions: 0, unsupportedFiles: 0, bytesRead: 0, recordsRead: 0, messageOccurrences: 0, uniqueMessages: 0, selectedEvents: 0, excludedEvents: 0, unknownTimestamps: 0, duplicateEvents: 0, unreadableFiles: 0, unreadableDirectories: 0, changedFiles: 0, truncatedFiles: 0, unresolvedLineage: 0, identityConflicts: 0, unsupportedRecords: 0, malformedLines: 0, missingIdentities: 0, selectionUncertainty: 0, discoveryComplete: false };
+  const started = Date.now();
+  const deadline = started + limits.ms;
+  // Reserve most of the caller's deadline for content reads after bounded metadata discovery.
+  const discoveryDeadline = started + Math.max(1, Math.floor(limits.ms / 4));
+  const coverage: CorpusCoverage = { discoveredFiles: 0, processedFiles: 0, logicalSessions: 0, unsupportedFiles: 0, entriesVisited: 0, candidatesSeen: 0, candidatesOmitted: 0, bytesRead: 0, recordsRead: 0, messageOccurrences: 0, uniqueMessages: 0, selectedEvents: 0, excludedEvents: 0, unknownTimestamps: 0, duplicateEvents: 0, unreadableFiles: 0, unreadableDirectories: 0, changedFiles: 0, truncatedFiles: 0, unresolvedLineage: 0, identityConflicts: 0, unsupportedRecords: 0, oversizedRecords: 0, malformedLines: 0, missingIdentities: 0, selectionUncertainty: 0, discoveryComplete: false };
   const checkpoint = () => {
     if (signal?.aborted) coverage.stopReason = "cancelled";
     else if (!coverage.stopReason && Date.now() >= deadline) coverage.stopReason = "deadline";
     return !coverage.stopReason;
   };
-  const files: string[] = [];
-  let visited = 0;
-  async function visit(path: string): Promise<void> {
-    if (!checkpoint()) return;
-    try {
-      const directory = await opendir(path);
-      for await (const entry of directory) {
-        if (!checkpoint()) break;
-        if (++visited > 100000) { coverage.stopReason = "directory_limit"; break; }
-        const full = join(path, entry.name);
-        if (entry.isDirectory()) await visit(full);
-        else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-          if (files.length >= limits.files) { coverage.stopReason = "file_limit"; break; }
-          files.push(full);
+  type Candidate = { path: string; mtimeMs: number; canonical: string };
+  const admitted: Candidate[] = [];
+  const compareCandidates = (left: Candidate, right: Candidate) => (right.mtimeMs - left.mtimeMs) || (left.canonical < right.canonical ? -1 : left.canonical > right.canonical ? 1 : 0);
+  const admit = (candidate: Candidate) => {
+    admitted.push(candidate); admitted.sort(compareCandidates);
+    if (admitted.length > limits.files) { admitted.pop(); coverage.candidatesOmitted++; }
+  };
+  let discoveryStop: CorpusCoverage["stopReason"];
+  const discoveryCheckpoint = () => {
+    if (signal?.aborted) discoveryStop = "cancelled";
+    else if (Date.now() >= discoveryDeadline) discoveryStop = "discovery_deadline";
+    return !discoveryStop;
+  };
+  async function visit(root: string): Promise<void> {
+    const directories = [root];
+    for (let index = 0; index < directories.length && discoveryCheckpoint(); index++) {
+      const path = directories[index]!;
+      try {
+        const directory = await opendir(path);
+        const entries = [];
+        for await (const entry of directory) entries.push(entry);
+        entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+        for (const entry of entries) {
+          if (!discoveryCheckpoint()) break;
+          if (++coverage.entriesVisited > 100000) { discoveryStop = "directory_limit"; break; }
+          const full = join(path, entry.name);
+          if (entry.isDirectory()) {
+            if (directories.length >= 100000) { discoveryStop = "directory_limit"; break; }
+            directories.push(full);
+          } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+            coverage.candidatesSeen++;
+            try { admit({ path: full, mtimeMs: (await stat(full)).mtimeMs, canonical: canonicalPath(full) }); }
+            catch { coverage.candidatesOmitted++; coverage.unreadableDirectories++; }
+          }
+          // Symlinks are deliberately not followed (no cycles or implicit scope expansion).
         }
-        // Symlinks are deliberately not followed (no cycles or implicit scope expansion).
-      }
-    } catch { coverage.unreadableDirectories++; }
+      } catch { coverage.unreadableDirectories++; }
+    }
   }
   const raw = params.session?.trim() || "current";
   if (raw === "current") throw new Error("Pass an explicit session id/path, directory or session='all'.");
   const candidate = resolve(cwd, homePath(raw));
   const explicitPath = isAbsolute(homePath(raw)) || /[/\\]/.test(raw) || raw.endsWith(".jsonl");
+  let directFile = false;
   if (checkpoint()) {
     if (explicitPath) {
-      try { if ((await stat(candidate)).isDirectory()) await visit(candidate); else files.push(candidate); }
-      catch { files.push(candidate); }
+      try { if ((await stat(candidate)).isDirectory()) await visit(candidate); else directFile = true; }
+      catch { directFile = true; }
     } else await visit(resolve(cwd, homePath(params.projectFolder ?? join(homedir(), ".pi", "agent", "sessions"))));
   }
+  const files = directFile ? [candidate] : admitted.map(item => item.path);
   coverage.discoveredFiles = files.length;
-  coverage.discoveryComplete = !coverage.stopReason && !coverage.unreadableDirectories;
-  // A discovery ceiling still permits processing the bounded discovered manifest.
-  const discoveryStop = coverage.stopReason;
-  if (discoveryStop === "file_limit" || discoveryStop === "directory_limit") delete coverage.stopReason;
+  coverage.discoveryComplete = !discoveryStop && !coverage.unreadableDirectories;
+  // Discovery bounds disclose omitted metadata work but leave reserved time for admitted content reads.
+  if (discoveryStop === "cancelled") coverage.stopReason = discoveryStop;
   const sources: CorpusSource[] = [];
   let lastProgress = Number.NEGATIVE_INFINITY;
   const knownMetadata = new Set(["session_info", "model_change", "thinking_level_change", "compaction", "branch_summary", "custom", "custom_message", "label"]);
-  for (const path of files.sort()) {
+  for (const path of files) {
     if (!checkpoint()) break;
     if (coverage.bytesRead >= limits.bytes) { coverage.stopReason = "byte_limit"; break; }
-    const source: CorpusSource = { path, sourceId: `source-${hash(canonicalPath(path))}`, id: `source-${hash(canonicalPath(path))}`, format: "unsupported", records: [], bytes: 0, malformedLines: 0, unsupportedRecords: 0, unknownTimestamps: 0, unresolvedLineage: 0, identityConflicts: 0, duplicateEvents: 0, selectedEvents: 0, excludedEvents: 0, unreadable: false, changed: false, truncated: false, missingIdentity: false };
+    const source: CorpusSource = { path, sourceId: `source-${hash(canonicalPath(path))}`, id: `source-${hash(canonicalPath(path))}`, format: "unsupported", records: [], bytes: 0, malformedLines: 0, unsupportedRecords: 0, oversizedRecords: 0, unknownTimestamps: 0, unresolvedLineage: 0, identityConflicts: 0, duplicateEvents: 0, selectedEvents: 0, excludedEvents: 0, unreadable: false, changed: false, truncated: false, missingIdentity: false };
     sources.push(source);
     let lineNumber = 0;
-    let first = true;
+    let firstRecord = true;
+    const recordBudget = () => {
+      if (coverage.recordsRead >= limits.records) { coverage.stopReason = "record_limit"; return false; }
+      coverage.recordsRead++; return true;
+    };
     const parse = (line: Buffer) => {
       lineNumber++;
       if (!line.toString("utf8").trim()) return;
-      if (coverage.recordsRead >= limits.records) { coverage.stopReason = "record_limit"; return; }
-      coverage.recordsRead++;
+      const isFirstRecord = firstRecord; firstRecord = false;
+      if (!recordBudget()) return;
       let entry: any;
       try { entry = JSON.parse(line.toString("utf8")); } catch { source.malformedLines++; return; }
-      if (first) {
-        first = false;
+      if (isFirstRecord) {
         if (entry?.type === "session" && [1, 2, 3].includes(entry.version ?? 1)) {
           source.format = "native"; source.version = entry.version ?? 1;
           if (typeof entry.id === "string" && entry.id.trim()) { source.headerId = entry.id; source.id = `session-${hash(entry.id)}`; }
@@ -145,6 +174,13 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       const selected = time !== undefined && time >= window.since && time <= window.until;
       source.records.push({ entry, key, line: lineNumber, time, selected, duplicate: false });
     };
+    const discard = (nonblank: boolean) => {
+      lineNumber++;
+      if (!nonblank) return;
+      firstRecord = false;
+      if (!recordBudget()) return;
+      source.unsupportedRecords++; source.oversizedRecords++;
+    };
     try {
       const before = await stat(path);
       source.fingerprint = sourceFingerprint(before);
@@ -154,24 +190,44 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       signal?.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => { coverage.stopReason ??= "deadline"; stream.destroy(); }, Math.max(1, deadline - Date.now()));
       let pending = Buffer.alloc(0);
+      let discarding = false;
+      let discardedNonblank = false;
+      const recordLimit = 1024 * 1024;
       try {
         for await (const chunk of stream) {
           if (!checkpoint()) break;
           const remaining = limits.bytes - coverage.bytesRead;
           const bytes = (chunk as Buffer).subarray(0, remaining);
           coverage.bytesRead += bytes.length; source.bytes += bytes.length;
-          pending = Buffer.concat([pending, bytes]);
-          let end: number;
-          while ((end = pending.indexOf(10)) >= 0 && checkpoint()) {
-            if (end > 1024 * 1024) { lineNumber++; source.unsupportedRecords++; } else parse(pending.subarray(0, end));
-            pending = pending.subarray(end + 1);
+          let offset = 0;
+          while (offset < bytes.length && checkpoint()) {
+            const end = bytes.indexOf(10, offset);
+            const segmentEnd = end < 0 ? bytes.length : end;
+            const segment = bytes.subarray(offset, segmentEnd);
+            if (discarding) {
+              discardedNonblank ||= Boolean(segment.toString("utf8").trim());
+              if (end >= 0) { discard(discardedNonblank); discarding = false; discardedNonblank = false; }
+            } else {
+              const combinedLength = pending.length + segment.length;
+              if (combinedLength > recordLimit) {
+                discardedNonblank = Boolean(pending.toString("utf8").trim()) || Boolean(segment.toString("utf8").trim());
+                pending = Buffer.alloc(0);
+                if (end >= 0) { discard(discardedNonblank); discardedNonblank = false; }
+                else discarding = true;
+              } else if (end >= 0) {
+                parse(Buffer.concat([pending, segment])); pending = Buffer.alloc(0);
+              } else pending = Buffer.concat([pending, segment]);
+            }
+            offset = end < 0 ? bytes.length : end + 1;
           }
-          if (pending.length > 1024 * 1024) { source.truncated = true; source.unsupportedRecords++; break; }
           if (Date.now() - lastProgress >= 250) { progress?.(sources.length, coverage.bytesRead); lastProgress = Date.now(); }
           await yieldTurn();
           if (bytes.length < (chunk as Buffer).length || (coverage.bytesRead >= limits.bytes && source.bytes < before.size)) { coverage.stopReason = "byte_limit"; break; }
         }
-        if (checkpoint() && !source.truncated && pending.length) parse(pending);
+        // Only EOF proves that an unterminated buffered record is complete; never parse cutoff residue.
+        if (checkpoint() && !discarding && pending.length && source.bytes === before.size) parse(pending);
+        if (!discarding && pending.length && source.bytes === before.size && pending.length > recordLimit) discard(Boolean(pending.toString("utf8").trim()));
+        if (discarding && source.bytes === before.size) discard(discardedNonblank);
       } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); stream.destroy(); }
       const after = await stat(path);
       source.changed = JSON.stringify(source.fingerprint) !== JSON.stringify(sourceFingerprint(after));
@@ -253,11 +309,11 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
     coverage.unsupportedFiles += Number(source.format === "unsupported");
     coverage.unreadableFiles += Number(source.unreadable); coverage.changedFiles += Number(source.changed); coverage.truncatedFiles += Number(source.truncated);
     coverage.missingIdentities += Number(source.missingIdentity);
-    for (const key of ["selectedEvents", "excludedEvents", "unknownTimestamps", "duplicateEvents", "unresolvedLineage", "identityConflicts", "unsupportedRecords", "malformedLines"] as const) coverage[key] += source[key];
+    for (const key of ["selectedEvents", "excludedEvents", "unknownTimestamps", "duplicateEvents", "unresolvedLineage", "identityConflicts", "unsupportedRecords", "oversizedRecords", "malformedLines"] as const) coverage[key] += source[key];
   }
   coverage.logicalSessions = new Set(selectedSources.filter(source => source.format === "native").map(source => source.id)).size;
   return { sources: selectedSources, coverage, window, limits, continueAnalysis };
 }
 export function corpusIncomplete(coverage: CorpusCoverage): boolean {
-  return Boolean(coverage.stopReason || !coverage.discoveryComplete || coverage.unsupportedFiles || coverage.unreadableFiles || coverage.changedFiles || coverage.truncatedFiles || coverage.unresolvedLineage || coverage.identityConflicts || coverage.unsupportedRecords || coverage.malformedLines || coverage.missingIdentities || coverage.unknownTimestamps || coverage.selectionUncertainty);
+  return Boolean(coverage.stopReason || !coverage.discoveryComplete || coverage.candidatesOmitted || coverage.unsupportedFiles || coverage.unreadableFiles || coverage.changedFiles || coverage.truncatedFiles || coverage.unresolvedLineage || coverage.identityConflicts || coverage.unsupportedRecords || coverage.malformedLines || coverage.missingIdentities || coverage.unknownTimestamps || coverage.selectionUncertainty);
 }
