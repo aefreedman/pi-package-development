@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- Support Pi 0.86 transcript system patches and arbitrary usage entries, including cache warming, as non-observation metadata while preserving native tool-call ancestry.
+
+### Changed
+
+- Update the development/test Pi baseline to 0.86.1; consumer-managed Pi hosts remain governed by the existing wildcard peer dependency.
+
 ## 0.5.1 - 2026-09-14
 
 ### Fixed

@@ -148,7 +148,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
   if (discoveryStop === "cancelled") coverage.stopReason = discoveryStop;
   const sources: CorpusSource[] = [];
   let lastProgress = Number.NEGATIVE_INFINITY;
-  const knownMetadata = new Set(["session_info", "model_change", "thinking_level_change", "compaction", "branch_summary", "custom", "custom_message", "label"]);
+  const knownMetadata = new Set(["session_info", "model_change", "thinking_level_change", "usage", "compaction", "branch_summary", "custom", "custom_message", "label"]);
   for (const path of files) {
     if (!checkpoint()) break;
     if (coverage.bytesRead >= limits.bytes) { coverage.stopReason = "byte_limit"; break; }

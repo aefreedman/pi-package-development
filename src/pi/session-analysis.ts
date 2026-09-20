@@ -27,6 +27,12 @@ function supportedContentBlock(role: string, value: unknown): boolean {
     default: return false;
   }
 }
+function supportedSystemContent(message: any): boolean {
+  return typeof message?.content === "string"
+    || (Array.isArray(message?.content) && message.content.every((block: unknown) => {
+      return supportedContentBlock("system", block) && (block as { type?: unknown }).type === "text";
+    }));
+}
 function textFromContent(message: any): string {
   if (typeof message?.content === "string") return message.content;
   return (Array.isArray(message?.content) ? message.content : []).filter((entry: any) => entry?.type === "text").map((entry: any) => String(entry.text ?? "")).join("\n");
@@ -105,6 +111,11 @@ async function analyzeSessionFile(source: CorpusSource, builder: EvidenceBuilder
     if (entry.type !== "message") continue;
     let message = entry.message ?? {};
     const counted = record.selected && !record.duplicate;
+    if (message.role === "system") {
+      // Transcript system patches are supported metadata, not observed user/tool activity.
+      if (!supportedSystemContent(message) && !record.duplicate) summary.unsupportedMessages++;
+      continue;
+    }
     if (!["user", "assistant", "toolResult"].includes(message.role)) { if (!record.duplicate) summary.unsupportedMessages++; continue; }
     if (!(typeof message.content === "string" && message.role === "user") && !Array.isArray(message.content)) { if (!record.duplicate) summary.unsupportedMessages++; continue; }
     // Preserve original block positions for exact provenance even when unsupported siblings are skipped.

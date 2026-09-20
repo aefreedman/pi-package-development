@@ -92,6 +92,22 @@ test("valid string/text/image/thinking/tool-call blocks retain complete extracti
   assert.equal(report.details.extraction.unresolvedResults, 0);
 });
 
+test("Pi 0.86 system and usage metadata preserve complete native ancestry", async () => {
+  const report = await analyze([
+    entry("u", null, { role: "user", content: "Synthetic request" }),
+    entry("s", "u", { role: "system", content: "Synthetic transcript patch" }),
+    entry("c", "s", { role: "assistant", stopReason: "toolUse", content: [call()] }),
+    { type: "usage", id: "warm", parentId: "c", timestamp: time, kind: "cache_warm", provider: "synthetic", model: "synthetic", usage: {} },
+    entry("r", "warm", result({ isError: true })),
+  ]);
+  assert.equal(report.details.analysisStatus, "complete");
+  assert.equal(report.details.extraction.unsupportedMessages, 0);
+  assert.equal(report.details.totals.failures, 1);
+  assert.equal(report.details.extraction.unresolvedCalls, 0);
+  assert.equal(report.details.extraction.unresolvedResults, 0);
+  assert.equal(report.packets[0].join, "native_id_ancestry");
+});
+
 test("mixed content retains valid sibling calls and native assistant terminal states", async () => {
   const report = await analyze([
     entry("c", null, { role: "assistant", stopReason: "error", content: [{ type: "future-call" }, { type: "text", text: { ok: false } }, text, thinking, call()] }),
