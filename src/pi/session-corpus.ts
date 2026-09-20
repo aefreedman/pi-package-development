@@ -66,6 +66,20 @@ export function eventTime(value: unknown): number | undefined {
   if (typeof value === "string") { try { return boundary(value); } catch { /* Unknown, never file time. */ } }
   return undefined;
 }
+function record(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function finiteNumbers(value: Record<string, unknown>, keys: string[]): boolean {
+  return keys.every(key => typeof value[key] === "number" && Number.isFinite(value[key]));
+}
+function validUsageEntry(entry: Record<string, unknown>): boolean {
+  if (typeof entry.kind !== "string" || typeof entry.provider !== "string" || typeof entry.model !== "string" || !record(entry.usage)) return false;
+  const usage = entry.usage;
+  if (!finiteNumbers(usage, ["input", "output", "cacheRead", "cacheWrite", "totalTokens"])) return false;
+  if (Object.hasOwn(usage, "cacheWrite1h") && (typeof usage.cacheWrite1h !== "number" || !Number.isFinite(usage.cacheWrite1h))) return false;
+  if (Object.hasOwn(usage, "reasoning") && (typeof usage.reasoning !== "number" || !Number.isFinite(usage.reasoning))) return false;
+  return record(usage.cost) && finiteNumbers(usage.cost, ["input", "output", "cacheRead", "cacheWrite", "total"]);
+}
 export function eventWindow(params: CorpusParams, now = Date.now()): EventWindow {
   const asOf = params.asOf === undefined ? now : boundary(params.asOf);
   const days = params.days ?? 7;
@@ -178,6 +192,7 @@ export async function scanSessionCorpus(params: CorpusParams, cwd: string, signa
       }
       if (source.format !== "native") { source.unsupportedRecords++; return; }
       if (!entry || typeof entry !== "object" || Array.isArray(entry) || (entry.type !== "message" && !knownMetadata.has(entry.type))) { source.unsupportedRecords++; return; }
+      if (entry.type === "usage" && !validUsageEntry(entry)) source.unsupportedRecords++;
       const key = typeof entry.id === "string" && entry.id ? entry.id : `line-${lineNumber}`;
       if (typeof entry.id !== "string" || !entry.id || (source.version !== 1 && !(entry.parentId === null || typeof entry.parentId === "string"))) source.unresolvedLineage++;
       const time = eventTime(entry.message?.timestamp) ?? eventTime(entry.timestamp);

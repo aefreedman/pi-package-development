@@ -27,11 +27,20 @@ function supportedContentBlock(role: string, value: unknown): boolean {
     default: return false;
   }
 }
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 function supportedSystemContent(message: any): boolean {
-  return typeof message?.content === "string"
+  const content = typeof message?.content === "string"
     || (Array.isArray(message?.content) && message.content.every((block: unknown) => {
       return supportedContentBlock("system", block) && (block as { type?: unknown }).type === "text";
     }));
+  if (!content || !Number.isFinite(message?.timestamp)) return false;
+  if (Object.hasOwn(message, "sections") && (!objectRecord(message.sections) || !Object.values(message.sections).every(value => typeof value === "string" || value === null))) return false;
+  if (Object.hasOwn(message, "toolsAdded") && (!Array.isArray(message.toolsAdded) || !message.toolsAdded.every((tool: unknown) => {
+    return objectRecord(tool) && typeof tool.name === "string" && typeof tool.description === "string" && objectRecord(tool.parameters);
+  }))) return false;
+  return !Object.hasOwn(message, "toolsRemoved") || (Array.isArray(message.toolsRemoved) && message.toolsRemoved.every((tool: unknown) => objectRecord(tool) && typeof tool.name === "string"));
 }
 function textFromContent(message: any): string {
   if (typeof message?.content === "string") return message.content;

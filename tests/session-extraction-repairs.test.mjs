@@ -14,6 +14,12 @@ const image = { type: "image", data: "c3ludGhldGlj", mimeType: "image/png" };
 const thinking = { type: "thinking", thinking: "Synthetic thought" };
 const call = (extra = {}) => ({ type: "toolCall", id: "native-call", name: "read", arguments: { path: "synthetic.txt" }, ...extra });
 const result = (extra = {}) => ({ role: "toolResult", toolName: "read", toolCallId: "native-call", isError: false, content: [text], ...extra });
+const system = (extra = {}) => ({ role: "system", content: "Synthetic transcript patch", timestamp: time, ...extra });
+const usage = (id, parentId, extra = {}) => ({
+  type: "usage", id, parentId, timestamp: time, kind: "cache_warm", provider: "synthetic", model: "synthetic",
+  usage: { input: 0, output: 0, cacheRead: 10, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0.01, cacheWrite: 0, total: 0.01 } },
+  ...extra,
+});
 async function analyze(records) {
   const root = await mkdtemp(join(tmpdir(), "pi-extraction-repair-synthetic-"));
   try {
@@ -92,20 +98,59 @@ test("valid string/text/image/thinking/tool-call blocks retain complete extracti
   assert.equal(report.details.extraction.unresolvedResults, 0);
 });
 
-test("Pi 0.86 system and usage metadata preserve complete native ancestry", async () => {
+test("Pi 0.86 system and unknown-kind usage metadata preserve complete native ancestry", async () => {
   const report = await analyze([
     entry("u", null, { role: "user", content: "Synthetic request" }),
-    entry("s", "u", { role: "system", content: "Synthetic transcript patch" }),
+    entry("s", "u", system({ sections: { skills: "<skills />" }, toolsAdded: [{ name: "read", description: "Synthetic read", parameters: {} }], toolsRemoved: [{ name: "obsolete" }] })),
     entry("c", "s", { role: "assistant", stopReason: "toolUse", content: [call()] }),
-    { type: "usage", id: "warm", parentId: "c", timestamp: time, kind: "cache_warm", provider: "synthetic", model: "synthetic", usage: {} },
+    usage("warm", "c", { kind: "future_usage_kind", usage: { input: 0, output: 0, cacheRead: 10, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0.01, cacheWrite: 0, total: 0.01 } } }),
     entry("r", "warm", result({ isError: true })),
   ]);
   assert.equal(report.details.analysisStatus, "complete");
+  assert.equal(report.details.corpus.unsupportedRecords, 0);
   assert.equal(report.details.extraction.unsupportedMessages, 0);
   assert.equal(report.details.totals.failures, 1);
   assert.equal(report.details.extraction.unresolvedCalls, 0);
   assert.equal(report.details.extraction.unresolvedResults, 0);
   assert.equal(report.packets[0].join, "native_id_ancestry");
+});
+
+test("malformed Pi 0.86 usage accounting is incomplete without severing native ancestry", async () => {
+  for (const invalid of [
+    { kind: 1 }, { provider: undefined }, { model: undefined }, { usage: {} },
+    { usage: { input: "0", output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+    { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } },
+  ]) {
+    const report = await analyze([
+      entry("u", null, { role: "user", content: "Synthetic request" }),
+      entry("c", "u", { role: "assistant", stopReason: "toolUse", content: [call()] }),
+      usage("warm", "c", invalid),
+      entry("r", "warm", result({ isError: true })),
+    ]);
+    assert.equal(report.details.analysisStatus, "incomplete", JSON.stringify(invalid));
+    assert.equal(report.details.corpus.unsupportedRecords, 1, JSON.stringify(invalid));
+    assert.equal(report.details.extraction.unresolvedResults, 0, JSON.stringify(invalid));
+    assert.equal(report.packets[0].join, "native_id_ancestry", JSON.stringify(invalid));
+  }
+});
+
+test("malformed Pi 0.86 system patch fields are incomplete without severing native ancestry", async () => {
+  for (const invalid of [
+    { timestamp: "not-a-timestamp" }, { sections: [] }, { sections: { skills: 1 } },
+    { toolsAdded: [{ name: "read", parameters: {} }] }, { toolsAdded: [{ name: "read", description: "Synthetic", parameters: [] }] }, { toolsRemoved: [{}] },
+  ]) {
+    const report = await analyze([
+      entry("u", null, { role: "user", content: "Synthetic request" }),
+      entry("s", "u", system(invalid)),
+      entry("c", "s", { role: "assistant", stopReason: "toolUse", content: [call()] }),
+      usage("warm", "c"),
+      entry("r", "warm", result({ isError: true })),
+    ]);
+    assert.equal(report.details.analysisStatus, "incomplete", JSON.stringify(invalid));
+    assert.equal(report.details.extraction.unsupportedMessages, 1, JSON.stringify(invalid));
+    assert.equal(report.details.extraction.unresolvedResults, 0, JSON.stringify(invalid));
+    assert.equal(report.packets[0].join, "native_id_ancestry", JSON.stringify(invalid));
+  }
 });
 
 test("mixed content retains valid sibling calls and native assistant terminal states", async () => {

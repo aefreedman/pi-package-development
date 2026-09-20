@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Support Pi 0.86 transcript system patches and arbitrary usage entries, including cache warming, as non-observation metadata while preserving native tool-call ancestry.
+- Support Pi 0.86 transcript system patches and arbitrary usage entries, including cache warming, as non-observation metadata while preserving native tool-call ancestry. Disclose malformed recognized patch/accounting fields as incomplete coverage.
 
 ### Changed
 
