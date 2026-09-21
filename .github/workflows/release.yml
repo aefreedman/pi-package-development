@@ -116,4 +116,20 @@ jobs:
           set -euo pipefail
           package_name="$(node -p "require('./package.json').name")"
           package_version="$(node -p "require('./package.json').version")"
-          test "$(npm view "${package_name}@${package_version}" gitHead)" = "$(git rev-parse HEAD)"
+          expected_head="$(git rev-parse HEAD)"
+          for attempt in 1 2 3 4 5 6; do
+            set +e
+            published_head="$(npm view "${package_name}@${package_version}" gitHead 2>&1)"
+            npm_status=$?
+            set -e
+            if [[ ${npm_status} -eq 0 ]]; then
+              test "${published_head}" = "${expected_head}"
+              exit 0
+            fi
+            if [[ ${published_head} =~ E404 ]] && [[ ${attempt} -lt 6 ]]; then
+              sleep $((attempt * 5))
+              continue
+            fi
+            printf '%s\n' "${published_head}" >&2
+            exit "${npm_status}"
+          done
