@@ -2,13 +2,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import { scanSessionCorpus, corpusIncomplete, type CorpusParams, type CorpusSource, type CorpusRecord } from "./session-corpus.js";
-import { EvidenceBuilder, EvidenceStore, EVIDENCE_LIMITS, publicToolLabel, type Classification, type CallEvidence, type QueryParams } from "./session-evidence.js";
+import { EvidenceBuilder, EvidenceStore, EVIDENCE_LIMITS, publicToolLabel, type Classification, type CallEvidence, type NestedCoverage, type EvidencePacket, type QueryParams } from "./session-evidence.js";
 
 type Params = CorpusParams & { limitLeads?: number };
 type Call = { name: string; entryKey: string; counted: boolean; evidence: CallEvidence; result?: boolean; args: Record<string, unknown> };
 type Summary = {
   toolCalls: number; failures: number; userMessages: number; unresolvedCalls: number; unresolvedResults: number;
   unsupportedMessages: number; unknownOutcomes: number; heuristicLeads: number; legacyCorrelations: number;
+  nestedCalls: number; nestedFailures: number; nestedUnknownOutcomes: number; nestedIncompleteResults: number; nestedMalformedRecords: number; nestedOmittedCalls: number;
   assistantErrors: number; assistantAborts: number; nativeOutcomes: Record<string, number>; semanticOutcomes: Record<string, number>; incomplete: boolean;
 };
 function increment(counter: Record<string, number>, key: string): void { counter[key] = (counter[key] ?? 0) + 1; }
@@ -75,8 +76,41 @@ function classifyToolResult(toolName: string, output: string, args: Record<strin
     source: nativeOutcome === "failure" ? "native" : structured ? "structured" : nativeOutcome === "success" ? "native" : heuristicLead ? "text_fallback" : "none" };
 }
 
+/** Child records describe observations on the parent result, not standalone transcript calls/results. */
+function nestedEvidence(value: unknown, builder: EvidenceBuilder, canContinue: () => boolean) {
+  const envelope = objectRecord(value) ? value : {};
+  const records = Array.isArray(envelope.calls) ? envelope.calls : [];
+  const coverage: NestedCoverage = { complete: typeof envelope.complete === "boolean" ? envelope.complete : null,
+    recordedCalls: Array.isArray(envelope.calls) ? records.length : null, processedCalls: 0, omittedCalls: 0, malformedRecords: 0,
+    incomplete: envelope.complete !== true || !Array.isArray(envelope.calls) };
+  const packets: Array<Pick<EvidencePacket, "toolRef" | "toolLabel" | "nested">> = [];
+  for (let position = 0; position < Math.min(records.length, EVIDENCE_LIMITS.nestedCalls); position++) {
+    if (!canContinue()) break;
+    const item = objectRecord(records[position]) ? records[position] : {};
+    const name = typeof item.name === "string" && item.name.length > 0 ? item.name : undefined;
+    const status = item.status === "ok" || item.status === "error" || item.status === "unfinished" ? item.status : "unknown";
+    const durationMs = typeof item.durationMs === "number" && Number.isFinite(item.durationMs) && item.durationMs >= 0 ? item.durationMs : null;
+    const present = objectRecord(item.arguments);
+    const omitted = !Object.hasOwn(item, "arguments") && Number.isSafeInteger(item.argumentsBytes) && item.argumentsBytes >= 0;
+    const errorValid = !Object.hasOwn(item, "error") || typeof item.error === "string";
+    const metadataValid = Boolean(name && typeof item.id === "string" && item.id.length > 0 && status !== "unknown"
+      && (present || omitted) && !(present && Object.hasOwn(item, "argumentsBytes")) && errorValid
+      && (!Object.hasOwn(item, "durationMs") || durationMs !== null) && (status === "unfinished" || durationMs !== null));
+    if (!metadataValid) coverage.malformedRecords++;
+    coverage.incomplete ||= !metadataValid || !present || status === "unfinished";
+    const toolLabel = name ? publicToolLabel(name) : undefined;
+    packets.push({ ...(name ? { toolRef: builder.ref("t", name) } : {}), ...(toolLabel ? { toolLabel } : {}),
+      nested: { position, status, durationMs, errorRecorded: errorValid ? Object.hasOwn(item, "error") : null,
+        argumentsState: present ? "present" : omitted ? "omitted" : "unknown", ...builder.fields(name ?? "", present ? item.arguments : {}), metadataValid } });
+    coverage.processedCalls++;
+  }
+  coverage.omittedCalls = records.length - coverage.processedCalls;
+  coverage.incomplete ||= coverage.omittedCalls > 0;
+  return { coverage, packets };
+}
+
 async function analyzeSessionFile(source: CorpusSource, builder: EvidenceBuilder, canContinue: () => boolean): Promise<Summary> {
-  const summary: Summary = { toolCalls: 0, failures: 0, userMessages: 0, unresolvedCalls: 0, unresolvedResults: 0, unsupportedMessages: 0, unknownOutcomes: 0, heuristicLeads: 0, legacyCorrelations: 0, assistantErrors: 0, assistantAborts: 0, nativeOutcomes: {}, semanticOutcomes: {}, incomplete: false };
+  const summary: Summary = { toolCalls: 0, failures: 0, userMessages: 0, unresolvedCalls: 0, unresolvedResults: 0, unsupportedMessages: 0, unknownOutcomes: 0, heuristicLeads: 0, legacyCorrelations: 0, nestedCalls: 0, nestedFailures: 0, nestedUnknownOutcomes: 0, nestedIncompleteResults: 0, nestedMalformedRecords: 0, nestedOmittedCalls: 0, assistantErrors: 0, assistantAborts: 0, nativeOutcomes: {}, semanticOutcomes: {}, incomplete: false };
   const calls: Call[] = [];
   const callsById = new Map<string, Call[]>();
   const pendingByName = new Map<string, Call[]>();
@@ -169,9 +203,22 @@ async function analyzeSessionFile(source: CorpusSource, builder: EvidenceBuilder
         if (outcome.nativeOutcome === "unknown" || outcome.semanticOutcome === "unknown") summary.unknownOutcomes++;
         if (outcome.heuristicLead) summary.heuristicLeads++;
         if (outcome.failed) summary.failures++;
+        const nested = Object.hasOwn(message, "nestedCalls") ? nestedEvidence(message.nestedCalls, builder, canContinue) : undefined;
+        if (nested) {
+          summary.nestedCalls += nested.coverage.processedCalls;
+          summary.nestedMalformedRecords += nested.coverage.malformedRecords;
+          summary.nestedOmittedCalls += nested.coverage.omittedCalls;
+          if (nested.coverage.incomplete) { summary.nestedIncompleteResults++; summary.incomplete = true; }
+          for (const packet of nested.packets) {
+            if (packet.nested?.status === "error") summary.nestedFailures++;
+            if (packet.nested?.status === "unknown" || packet.nested?.status === "unfinished") summary.nestedUnknownOutcomes++;
+            emit(record, { kind: "nested_tool_call", provenance, ...packet });
+          }
+        }
         const callTime = correlated?.evidence.locator.time;
         const toolLabel = publicToolLabel(name);
         emit(record, { kind: "tool_result", provenance, toolRef: builder.ref("t", name), ...(toolLabel ? { toolLabel } : {}), outcome,
+          ...(nested ? { nestedCoverage: nested.coverage } : {}),
           join: correlated ? suppliedId ? "native_id_ancestry" : "legacy_name_ancestry" : "unresolved",
           ...(correlated ? { call: correlated.evidence, messageObservedSpanMs: callTime != null && record.time !== undefined && record.time >= callTime ? record.time - callTime : null } : {}) });
       }
@@ -238,12 +285,13 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
       const report = store.save(index, ctx.sessionManager ?? ctx.cwd, generation);
       return store.scanPage(report, {
         analysisStatus: incomplete ? "incomplete" : "complete", corpus: corpus.coverage,
-        eventWindow: corpus.window, scanLimits: corpus.limits,
+        eventWindow: corpus.window, scanLimits: { ...corpus.limits, maxNestedCallsPerResult: EVIDENCE_LIMITS.nestedCalls },
         totals: { toolCalls: sum("toolCalls"), failures: sum("failures"), userMessages: sum("userMessages") },
         extraction: { processedSources: summaries.length,
           ...Object.fromEntries(["unresolvedCalls", "unresolvedResults", "unsupportedMessages", "unknownOutcomes", "heuristicLeads", "legacyCorrelations", "assistantErrors", "assistantAborts"].map(key => [key, sum(key as keyof Summary)])),
+          nested: { observedCalls: sum("nestedCalls"), failures: sum("nestedFailures"), unknownOutcomes: sum("nestedUnknownOutcomes"), incompleteResults: sum("nestedIncompleteResults"), malformedRecords: sum("nestedMalformedRecords"), omittedCalls: sum("nestedOmittedCalls") },
           nativeOutcomes: outcomes("nativeOutcomes"), semanticOutcomes: outcomes("semanticOutcomes") },
-        method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked.",
+        method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked. Top-level totals exclude nested calls. Nested metadata has no full results or semantic outcomes; durationMs is recorded metadata, not a message span. Child provenance is the parent result line plus nested position, never a standalone call locator; complete=false may hide an unknown number of calls.",
         privacy: "Opaque report-local refs with vetted literal public tool labels only. Source text, paths, native IDs, unvetted tool names, argument keys/values and result details omitted. Local paths require a separate explicitly authorized locator query.",
       }, params.limitLeads);
     },

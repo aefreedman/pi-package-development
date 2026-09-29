@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { sourceFingerprint, type CorpusRecord, type CorpusSource, type SourceFingerprint } from "./session-corpus.js";
 
-export const EVIDENCE_LIMITS = { reports: 4, events: 5000, indexBytes: 4 * 1024 * 1024, responseBytes: 8192, pageRows: 10, fields: 8, lifetimeMs: 15 * 60 * 1000 } as const;
+export const EVIDENCE_LIMITS = { reports: 4, events: 5000, indexBytes: 4 * 1024 * 1024, responseBytes: 8192, pageRows: 10, fields: 8, nestedCalls: 256, lifetimeMs: 15 * 60 * 1000 } as const;
 const opaque = (kind: string) => `${kind}_${randomBytes(12).toString("hex")}`;
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 // Reviewed literal public vocabulary: Pi built-ins, our registered tools and shipped Codecks fixture operations.
@@ -22,12 +22,16 @@ export type Classification = {
 type Locator = { sourceRef: string; sessionRef: string; lineageRef: string; entryRef: string; parentRef: string | null; line: number; time: number | null; selected: boolean; duplicate: boolean };
 export type CallEvidence = { locator: Locator; toolRef: string; toolLabel?: PublicToolLabel | undefined; fields: Array<{ fieldRef: string; type: string }>; omittedFields: number; block: number };
 export type EvidencePacket = {
-  eventRef: string; kind: "tool_result" | "tool_call" | "user_message" | "assistant_error" | "assistant_aborted";
+  eventRef: string; kind: "nested_tool_call" | "tool_result" | "tool_call" | "user_message" | "assistant_error" | "assistant_aborted";
   provenance: Locator; toolRef?: string; toolLabel?: PublicToolLabel | undefined; call?: CallEvidence; outcome?: Classification;
   context?: Array<{ provenance: Locator; role: "user" | "assistant" | "toolResult" | "other" }>;
   join?: "native_id_ancestry" | "legacy_name_ancestry" | "unresolved";
   messageObservedSpanMs?: number | null;
+  nestedCoverage?: NestedCoverage;
+  nested?: { position: number; status: "ok" | "error" | "unfinished" | "unknown"; durationMs: number | null; errorRecorded: boolean | null;
+    argumentsState: "present" | "omitted" | "unknown"; fields: CallEvidence["fields"]; omittedFields: number; metadataValid: boolean };
 };
+export type NestedCoverage = { complete: boolean | null; recordedCalls: number | null; processedCalls: number; omittedCalls: number; malformedRecords: number; incomplete: boolean };
 type Lead = { leadRef: string; toolRef?: string | undefined; toolLabel?: PublicToolLabel | undefined; signature: string; judgment: "unreviewed"; indexedEvents: number; indexedSessions: number; indexedLineages: number; eventRef: string };
 type PrivateSource = { path: string; fingerprint?: SourceFingerprint | undefined; changed: boolean };
 type Cluster = { lead: Lead; events: number[]; sessions: Set<string>; lineages: Set<string> };
@@ -53,17 +57,20 @@ export class EvidenceBuilder {
     };
   }
   call(source: CorpusSource, record: CorpusRecord, block: number, name: string, args: Record<string, unknown>): CallEvidence {
-    const keys = Object.keys(args);
     const toolLabel = publicToolLabel(name);
-    return { locator: this.locator(source, record), block, toolRef: this.ref("t", name), ...(toolLabel ? { toolLabel } : {}),
-      fields: keys.slice(0, EVIDENCE_LIMITS.fields).map(key => ({ fieldRef: this.ref("f", JSON.stringify([name, key])), type: args[key] === null ? "null" : Array.isArray(args[key]) ? "array" : typeof args[key] })),
+    return { locator: this.locator(source, record), block, toolRef: this.ref("t", name), ...(toolLabel ? { toolLabel } : {}), ...this.fields(name, args) };
+  }
+  fields(name: string, args: Record<string, unknown>): Pick<CallEvidence, "fields" | "omittedFields"> {
+    const keys = Object.keys(args);
+    return { fields: keys.slice(0, EVIDENCE_LIMITS.fields).map(key => ({ fieldRef: this.ref("f", JSON.stringify([name, key])), type: args[key] === null ? "null" : Array.isArray(args[key]) ? "array" : typeof args[key] })),
       omittedFields: Math.max(0, keys.length - EVIDENCE_LIMITS.fields) };
   }
   add(source: CorpusSource, packet: Omit<EvidencePacket, "eventRef">): void {
     this.observedEvents++;
     if (this.closed) return;
     const event = { ...packet, eventRef: opaque("v") };
-    const signature = event.kind === "tool_result" && event.outcome
+    const signature = event.kind === "nested_tool_call" && event.nested?.status === "error" ? "nested_metadata_failure"
+      : event.kind === "tool_result" && event.outcome
       ? event.outcome.failed ? `typed_failure:${event.outcome.nativeOutcome}:${event.outcome.semanticOutcome}` : event.outcome.heuristicLead ? "unverified_text_signature" : undefined
       : event.kind === "assistant_error" || event.kind === "assistant_aborted" ? event.kind : undefined;
     const key = JSON.stringify([event.toolRef, signature]);

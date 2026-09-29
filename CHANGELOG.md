@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Account for bounded Pi 0.99 nested tool-call metadata separately from top-level session totals. Query child observations with parent-result provenance, redacted argument shapes, recorded status/duration, and explicit incomplete coverage; no child results or semantic outcomes are inferred.
+- Update the Pi SDK development and validation baseline to 0.99.1 (host peers remain wildcard).
+
 ## 0.5.3 - 2026-09-21
 
 ### Changed
