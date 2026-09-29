@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin TypeScript 7.0.2; align direct Node types with the runtime floor; require Node >=22.19.0 for the Pi runtime.
+
 ### Changed
 
 - Account for bounded Pi 0.99 nested tool-call metadata separately from top-level session totals. Query child observations with parent-result provenance, redacted argument shapes, recorded status/duration, and explicit incomplete coverage; no child results or semantic outcomes are inferred.
