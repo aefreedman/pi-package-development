@@ -9,8 +9,17 @@ const manifest = JSON.parse(
 test("declares its Pi resources", () => {
   assert.deepEqual(manifest.pi.extensions, ["./extensions/index.ts"]);
   assert.ok(!manifest.files.includes("src"), "Compiled dist is the consumer runtime; authored source remains repository-only.");
+  assert.ok(manifest.files.includes("dist/**/*.js"), "Pack runtime JavaScript, not internal declarations or maps.");
+  assert.ok(!manifest.files.includes("dist"));
   assert.deepEqual(manifest.pi.skills, ["./skills"]);
   assert.deepEqual(manifest.pi.prompts, ["./prompts"]);
+});
+
+test("builds runtime output without unsupported debugging artifacts", async () => {
+  const config = JSON.parse(await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"));
+  assert.equal(config.compilerOptions.declaration, false);
+  assert.equal(config.compilerOptions.declarationMap, false);
+  assert.equal(config.compilerOptions.sourceMap, false);
 });
 
 test("ships session analysis tooling and prompt guidance", async () => {

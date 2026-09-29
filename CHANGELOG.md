@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
-
-- Pin TypeScript 7.0.2; align direct Node types with the runtime floor; require Node >=22.19.0 for the Pi runtime.
+## 0.5.4 - 2026-09-29
 
 ### Changed
+
+- Pin TypeScript 7.0.2; align direct Node types with the runtime floor; require Node >=22.19.0 for the Pi runtime.
+- Ship freshly compiled extension JavaScript without internal declarations or maps referencing omitted source; retain all skill-eval starter assets.
 
 - Account for bounded Pi 0.99 nested tool-call metadata separately from top-level session totals. Query child observations with parent-result provenance, redacted argument shapes, recorded status/duration, and explicit incomplete coverage; no child results or semantic outcomes are inferred.
 - Update the Pi SDK development and validation baseline to 0.99.1 (host peers remain wildcard).

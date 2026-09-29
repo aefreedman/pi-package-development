@@ -71,6 +71,6 @@ pi install npm:@aefree/pi-package-references
 pi install npm:@aefree/pi-package-development
 ```
 
-The package continues to register its public `references/package-development/` mount for those external consumers. For local source development, install dependencies and build before loading the package directory with `pi install <path>`.
+The package continues to register its public `references/package-development/` mount for those external consumers. For local source development, install dependencies and build before loading the package directory with `pi install <path>`. npm packaging rebuilds ignored `dist/` from source and ships compiled extension JavaScript; this package has no public Node API or declaration/source-map debugging contract. Skills retain their starter code as bootstrap resources. Build, test, and eval scripts are repository-maintainer commands, not commands to run from the installed npm artifact.
 
 The audit and release-preparation skills fail explicitly when a required package-local reference cannot be read; they do not silently substitute workspace-relative documentation.
