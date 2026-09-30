@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Do not fail an otherwise successful trusted-publishing run while npm propagates metadata; keep the pre-publish identity guard.
+
 ## 0.5.4 - 2026-09-29
 
 ### Changed
