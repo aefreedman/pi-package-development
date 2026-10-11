@@ -161,7 +161,7 @@ test("removing incident inference preserves totals without its former cap; metad
   const large = await save("large.jsonl", [header("output-cap"), call("c", null, "c", name), result("r", "c", "c", { toolName: name })]);
   const bounded = await run({ session: large, reportMode: "full" });
   assert(!JSON.stringify(bounded).includes(name));
-  assert(Buffer.byteLength(JSON.stringify(bounded)) <= 8192);
+  assert(Buffer.byteLength(JSON.stringify(bounded.structuredContent)) <= 32768); assert(Buffer.byteLength(bounded.content[0].text) <= 8192);
   assert.equal(bounded.details.totals.toolCalls, 1);
 }));
 
@@ -169,13 +169,10 @@ test("registered scan honours pre-abort, streamed abort and changed-source diagn
   const file = await save("session.jsonl", [header("cancel"), ...Array.from({ length: 1000 }, (_, i) => message(`u${i}`, i ? `u${i-1}` : null, { role: "user", content: "Synthetic ".repeat(100) }))]);
   const pre = new AbortController(); pre.abort();
   const cancelled = await run({}, pre.signal);
-  assert.equal(cancelled.details.corpus.bytesRead, 0);
-  assert.equal(cancelled.details.corpus.stopReason, "cancelled");
-  assert.equal(cancelled.details.analysisStatus, "incomplete");
+  assert.equal(cancelled.isError, true); assert.equal(cancelled.structuredContent.error.code, "evidence_query_cancelled");
   const mid = new AbortController();
   const partial = await run({}, mid.signal, () => mid.abort());
-  assert.equal(partial.details.corpus.stopReason, "cancelled");
-  assert(partial.details.corpus.bytesRead <= 65536);
+  assert.equal(partial.isError, true); assert.equal(partial.structuredContent.error.code, "evidence_query_cancelled");
   let mutation;
   const changed = await run({}, undefined, () => { mutation ??= appendFile(file, "\n"); });
   await mutation;

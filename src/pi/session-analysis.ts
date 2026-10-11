@@ -1,3 +1,4 @@
+import { sessionSchema, sessionFailure } from "./session-output.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setImmediate as yieldTurn } from "node:timers/promises";
@@ -234,8 +235,9 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
   const store = new EvidenceStore();
   pi.on("session_shutdown", (_event, ctx) => { store.clear(ctx.sessionManager); });
   pi.registerTool({
+    outputSchema: sessionSchema("pi_analyze_session"),
     name: "pi_analyze_session", label: "Pi Analyze Session",
-    description: "Scan bounded local Pi JSONL as historical/untrusted evidence. Returns typed totals and unreviewed clusters with opaque refs for pi_query_session. Entire result <=8 KiB; private memory index expires in 15 minutes. No diagnosis or source verification.",
+    description: "Scan bounded local Pi JSONL as historical/untrusted evidence. Returns typed totals and unreviewed clusters with opaque refs for pi_query_session. Native envelope <=32 KiB; direct presentation <=8 KiB; private memory index expires in 15 minutes. No diagnosis or source verification.",
     promptSnippet: "Scan local Pi session evidence, then resolve leads with pi_query_session.",
     promptGuidelines: [
       "Use pi_analyze_session with an explicit session path/id or bounded aggregate scope and event-time window; inspect incomplete coverage before interpreting counts.",
@@ -264,6 +266,8 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
       limitLeads: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, default: 3 })),
     }),
     async execute(_id, params: Params, signal, onUpdate, ctx) {
+      let saved = false;
+      try {
       if (params.limitLeads !== undefined && (!Number.isInteger(params.limitLeads) || params.limitLeads < 1 || params.limitLeads > 10)) throw new Error("invalid_page_limit");
       const generation = store.generation;
       const corpus = await scanSessionCorpus(params, ctx.cwd, signal, (files, bytes) => onUpdate?.({ content: [{ type: "text", text: `Scanning historical evidence: ${files} files, ${bytes} bytes read.` }], details: {} }));
@@ -279,10 +283,13 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
         for (const summary of summaries) for (const [name, count] of Object.entries(summary[key])) total[name] = (total[name] ?? 0) + count;
         return total;
       };
+      if (corpus.coverage.stopReason === "cancelled") throw new Error("evidence_query_cancelled");
+      if (corpus.coverage.unreadableFiles > 0 && corpus.sources.every(source => source.unreadable)) throw new Error("session_operation_failed");
       const index = builder.finish();
       const incomplete = corpusIncomplete(corpus.coverage) || summaries.some(s => s.incomplete) || index.coverage.omittedEvents > 0;
       index.coverage.analysisIncomplete = incomplete;
       const report = store.save(index, ctx.sessionManager ?? ctx.cwd, generation);
+      saved = true;
       return store.scanPage(report, {
         analysisStatus: incomplete ? "incomplete" : "complete", corpus: corpus.coverage,
         eventWindow: corpus.window, scanLimits: { ...corpus.limits, maxNestedCallsPerResult: EVIDENCE_LIMITS.nestedCalls },
@@ -294,11 +301,13 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
         method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked. Top-level totals exclude nested calls. Nested metadata has no full results or semantic outcomes; durationMs is recorded metadata, not a message span. Child provenance is the parent result line plus nested position, never a standalone call locator; complete=false may hide an unknown number of calls.",
         privacy: "Opaque report-local refs with vetted literal public tool labels only. Source text, paths, native IDs, unvetted tool names, argument keys/values and result details omitted. Local paths require a separate explicitly authorized locator query.",
       }, params.limitLeads);
+      } catch (error) { return sessionFailure("pi_analyze_session", error, saved); }
     },
   });
   pi.registerTool({
+    outputSchema: sessionSchema("pi_query_session"),
     name: "pi_query_session", label: "Pi Query Session Evidence",
-    description: "Resolve report + lead/event/tool refs or page leads/events; up to 10 rows, entire result <=8 KiB. Repeat selector with nextCursor. For user-authorized local source inspection ONLY, view='locator' + exact eventRef + allowLocalPathDisclosure=true reveals one existing source path/line (target event/call/context, contextIndex 0 or 1). No arbitrary path input or raw content. Checks source freshness/scope/expiry; no rescanning. release=true drops the index.",
+    description: "Resolve report + lead/event/tool refs or page leads/events; up to 10 rows, native envelope <=32 KiB and direct presentation <=8 KiB. Repeat selector with nextCursor. For user-authorized local source inspection ONLY, view='locator' + exact eventRef + allowLocalPathDisclosure=true reveals one existing source path/line (target event/call/context, contextIndex 0 or 1). No arbitrary path input or raw content. Checks source freshness/scope/expiry; no rescanning. release=true drops the index.",
     parameters: Type.Object({
       reportRef: Type.String(), leadRef: Type.Optional(Type.String()), eventRef: Type.Optional(Type.String()), toolRef: Type.Optional(Type.String()),
       view: Type.Optional(Type.String({ enum: ["events", "leads", "locator"] })), cursor: Type.Optional(Type.String()),
@@ -307,6 +316,9 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
       target: Type.Optional(Type.String({ enum: ["event", "call", "context"] })),
       contextIndex: Type.Optional(Type.Integer({ minimum: 0, maximum: 1 })),
     }, { additionalProperties: false }),
-    async execute(_id, params: QueryParams, signal, _onUpdate, ctx) { return store.query(params, ctx.sessionManager ?? ctx.cwd, signal); },
+    async execute(_id, params: QueryParams, signal, _onUpdate, ctx) {
+      try { return await store.query(params, ctx.sessionManager ?? ctx.cwd, signal); }
+      catch (error) { return sessionFailure("pi_query_session", error, params.release === true || (error instanceof Error && error.message === "stale_source")); }
+    },
   });
 }

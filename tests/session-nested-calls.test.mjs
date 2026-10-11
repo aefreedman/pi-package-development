@@ -21,12 +21,16 @@ async function fixture(nestedCalls, run) {
   try {
     await writeFile(path, records.map(record => JSON.stringify(record)).join("\n"));
     const scan = await tools.pi_analyze_session.execute("scan", { session: path, since: "2026-01-02", until: "2026-01-02", asOf: "2026-01-03T00:00:00Z" }, undefined, undefined, ctx);
-    const query = async (params = {}) => tools.pi_query_session.execute("query", { reportRef: scan.details.reportRef, ...params }, undefined, undefined, ctx);
+    const query = async (params = {}) => {
+      const result = await tools.pi_query_session.execute("query", { reportRef: scan.details.reportRef, ...params }, undefined, undefined, ctx);
+      if (result.isError) { assert.equal(result.structuredContent.ok, false); throw new Error(result.structuredContent.error.code); }
+      return result;
+    };
     const rows = [];
     let cursor;
     do {
       const page = await query({ limit: 10, ...(cursor ? { cursor } : {}) });
-      assert.ok(Buffer.byteLength(JSON.stringify(page)) <= 8192);
+      assert.ok(Buffer.byteLength(JSON.stringify(page.structuredContent)) <= 32768); assert.ok(Buffer.byteLength(page.content[0].text) <= 8192);
       rows.push(...page.details.rows);
       cursor = page.details.nextCursor;
     } while (cursor);

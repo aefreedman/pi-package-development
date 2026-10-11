@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Versioned, producer-validated native session envelopes, exact opaque references, structured errors and independent 8 KiB direct / 32 KiB native budgets without reducing page capacity for duplicated channels.
+
+### Changed
+
+- Align development validation with Pi 1.1.0 without changing the package version.
+
 ### Fixed
 
 - Do not fail an otherwise successful trusted-publishing run while npm propagates metadata; keep the pre-publish identity guard.

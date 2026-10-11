@@ -1,8 +1,9 @@
+import { SESSION_NATIVE_BYTES, SESSION_CONTENT_BYTES, jsonBytes, validateSession } from "./session-output.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { sourceFingerprint, type CorpusRecord, type CorpusSource, type SourceFingerprint } from "./session-corpus.js";
 
-export const EVIDENCE_LIMITS = { reports: 4, events: 5000, indexBytes: 4 * 1024 * 1024, responseBytes: 8192, pageRows: 10, fields: 8, nestedCalls: 256, lifetimeMs: 15 * 60 * 1000 } as const;
+export const EVIDENCE_LIMITS = { reports: 4, events: 5000, indexBytes: 4 * 1024 * 1024, responseBytes: SESSION_CONTENT_BYTES, nativeBytes: SESSION_NATIVE_BYTES, pageRows: 10, fields: 8, nestedCalls: 256, lifetimeMs: 15 * 60 * 1000 } as const;
 const opaque = (kind: string) => `${kind}_${randomBytes(12).toString("hex")}`;
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 // Reviewed literal public vocabulary: Pi built-ins, our registered tools and shipped Codecks fixture operations.
@@ -102,10 +103,21 @@ export type QueryParams = { reportRef: string; leadRef?: string; eventRef?: stri
   allowLocalPathDisclosure?: boolean; target?: "event" | "call" | "context"; contextIndex?: number };
 
 export function evidenceResult(details: Record<string, unknown>) {
-  // Both copies and the native result wrapper count toward the ceiling, not only model-facing text.
-  const result = { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
-  if (bytes(result) > EVIDENCE_LIMITS.responseBytes) throw new Error("evidence_response_limit");
-  return result;
+  const operation = details.analysisStatus === undefined ? "pi_query_session" : "pi_analyze_session";
+  const structuredContent = validateSession(operation, details);
+  // Keep bounded legacy details; presentation duplication never consumes native page capacity.
+  let display = details;
+  if (jsonBytes(display) > SESSION_CONTENT_BYTES && Array.isArray(details.rows)) {
+    const rows = [...details.rows];
+    display = { ...details, rows, presentationOmittedRows: 0 };
+    while (jsonBytes(display) > SESSION_CONTENT_BYTES && rows.length) {
+      rows.pop(); display.presentationOmittedRows = details.rows.length - rows.length;
+    }
+  }
+  const text = JSON.stringify(display);
+  if (Buffer.byteLength(text) > SESSION_CONTENT_BYTES || bytes(details) > SESSION_NATIVE_BYTES) throw new Error("evidence_response_limit");
+  return { content: [{ type: "text" as const, text }], details, structuredContent };
+
 }
 
 /** Extension-instance scoped, memory-only; no persisted transcript/index or background worker. */
@@ -166,13 +178,14 @@ export class EvidenceStore {
     const rows = view === "leads" ? report.clusters.map(c => c.lead) : events;
     if (offset > rows.length) throw new Error("invalid_cursor");
     const selected: unknown[] = [];
-    const details: Record<string, unknown> = { ...metadata, schemaVersion: 2, reportRef: report.reportRef, expiresAt: report.expiresAt, view, total: rows.length, rows: selected, nextCursor: null, sourceChecks: 0, evidenceCoverage: report.coverage };
+    const details: Record<string, unknown> = { ...metadata, schemaVersion: 2, reportRef: report.reportRef, expiresAt: report.expiresAt, view, total: rows.length, rows: selected, returned: 0, omitted: rows.length, nextCursor: null, sourceChecks: 0, evidenceCoverage: report.coverage };
     let end = offset;
     for (; end < rows.length && selected.length < limit; end++) {
-      selected.push(rows[end]); details.nextCursor = end + 1 < rows.length ? this.cursor(report, selector, end + 1) : null;
-      try { evidenceResult({ ...details, sourceChecks: EVIDENCE_LIMITS.pageRows * 2 }); } catch { selected.pop(); break; }
+      selected.push(rows[end]); details.returned = selected.length; details.omitted = rows.length - selected.length; details.nextCursor = end + 1 < rows.length ? this.cursor(report, selector, end + 1) : null;
+      try { validateSession(metadata.analysisStatus === undefined ? "pi_query_session" : "pi_analyze_session", { ...details, sourceChecks: EVIDENCE_LIMITS.pageRows * 2 }); } catch { selected.pop(); break; }
     }
     if (end < rows.length && !selected.length) throw new Error("evidence_response_limit");
+    details.returned = selected.length; details.omitted = rows.length - selected.length;
     details.nextCursor = end < rows.length ? this.cursor(report, selector, end) : null;
     const selectedEvents = view === "leads" ? (selected as Lead[]).map(lead => report.events.find(e => e.eventRef === lead.eventRef)!) : selected as EvidencePacket[];
     return { details, selectedEvents };

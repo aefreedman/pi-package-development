@@ -26,7 +26,7 @@ test("historical synthetic regression corpus now exposes observations without fi
     assert.equal(lead.judgment, "unreviewed");
     const page = await query.execute("evidence", { reportRef: report.details.reportRef, leadRef: lead.leadRef }, undefined, undefined, ctx);
     assert(page.details.rows.some(row => row.eventRef === lead.eventRef), "every promoted lead resolves in one query");
-    assert(Buffer.byteLength(JSON.stringify(page)) <= 8192);
+    assert(Buffer.byteLength(JSON.stringify(page.structuredContent)) <= 32768); assert(Buffer.byteLength(page.content[0].text) <= 8192);
     for (const forbidden of ["PRIVATE SYNTHETIC CARD BODY", "TOPSECRETVALUE", "SUPERSECRETVALUE", "likely_already_fixed", "current_source_confirmed", "successful recovery", "maxConcurrency"]) assert(!JSON.stringify(page).includes(forbidden));
   }
   assert.equal(report.details.incidents, undefined, "unsupported legacy causal incidents are intentionally retired");

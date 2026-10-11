@@ -20,7 +20,18 @@ function pair(id, parent, name = canary, isError = true, args = { [canary]: cana
 async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), "pi-evidence-synthetic-"));
   const tools = new Map(), handlers = new Map();
-  register({ registerTool(tool) { tools.set(tool.name, tool); }, on(name, fn) { const list = handlers.get(name) ?? []; list.push(fn); handlers.set(name, list); } });
+  register({ registerTool(tool) {
+    const execute = tool.execute;
+    tools.set(tool.name, { ...tool, async execute(...args) {
+      const result = await execute(...args);
+      if (result.isError) {
+        assert.equal(result.structuredContent.ok, false);
+        assert(Value.Check(tool.outputSchema, result.structuredContent));
+        throw new Error(result.structuredContent.error.code);
+      }
+      assert(Value.Check(tool.outputSchema, result.structuredContent));
+      return result;
+    } }); }, on(name, fn) { const list = handlers.get(name) ?? []; list.push(fn); handlers.set(name, list); } });
   const ctx = { cwd: root, sessionManager: {} };
   const execute = (name, params, context = ctx, signal) => {
     const tool = tools.get(name); const prepared = tool.prepareArguments ? tool.prepareArguments(params) : params;
@@ -30,7 +41,9 @@ async function fixture(fn) {
   const scan = (params = {}, context = ctx, signal) => execute("pi_analyze_session", { session: root, ...bounds, ...params }, context, signal);
   const query = (report, params = {}, context = ctx, signal) => execute("pi_query_session", { reportRef: report.details.reportRef, ...params }, context, signal);
   const save = async (name, rows) => { const path = join(root, name); await writeFile(path, rows.map(row => typeof row === "string" ? row : JSON.stringify(row)).join("\n")); return path; };
-  const safe = (result) => { assert(Buffer.byteLength(JSON.stringify(result)) <= 8192); assert(!JSON.stringify(result).includes(canary)); assert(!JSON.stringify(result).includes(root)); assert.deepEqual(JSON.parse(result.content[0].text), result.details); };
+  const safe = (result) => { assert(Buffer.byteLength(JSON.stringify(result.structuredContent)) <= 32768); assert(Buffer.byteLength(result.content[0].text) <= 8192); assert(!JSON.stringify(result).includes(canary)); assert(!JSON.stringify(result).includes(root)); const display = JSON.parse(result.content[0].text);
+    if (display.presentationOmittedRows) { assert.equal(display.rows.length + display.presentationOmittedRows, result.details.rows.length); }
+    else assert.deepEqual(display, result.details); };
   try { await fn({ root, ctx, tools, handlers, scan, query, save, safe }); } finally { for (const fn of handlers.get("session_shutdown") ?? []) await fn({}, ctx); await rm(root, { recursive: true, force: true }); }
 }
 
@@ -50,7 +63,7 @@ test("aggregate triage identifies a public operation and one opted-in locator fe
   assert.equal(local.details.locator.path, expected); assert.equal(local.details.locator.line, 5);
   assert.equal(local.details.sourceChecks, 1); assert.equal(local.details.locator.block, undefined);
   assert(!JSON.stringify(local).includes(canary), "opt-in path does not reveal native IDs, args, output or user text");
-  assert(Buffer.byteLength(JSON.stringify(local)) <= 8192);
+  assert(Buffer.byteLength(JSON.stringify(local.structuredContent)) <= 32768); assert(Buffer.byteLength(local.content[0].text) <= 8192);
   const nativeRead = createReadToolDefinition(ctx.cwd);
   const read = await nativeRead.execute("read-exact-source", { path: local.details.locator.path, offset: local.details.locator.line, limit: 1 }, undefined, undefined, ctx);
   assert.equal(read.content[0].text.split("\n")[0], JSON.stringify(rows[4]), "real read receives exact source line without search or corpus JSON parsing");
@@ -111,9 +124,9 @@ test("opted-in locators preserve stale, expired, cross-scope and output-bound pr
   try { Date.now = () => report.details.expiresAt; await assert.rejects(query(report, args(report)), /expired_report/); } finally { Date.now = realNow; }
   report = await scan(); const aborted = new AbortController(); aborted.abort();
   await assert.rejects(query(report, args(report), ctx, aborted.signal), /evidence_query_cancelled/);
-  const locator = await query(report, args(report)); assert(Buffer.byteLength(JSON.stringify(locator)) <= 8192);
+  const locator = await query(report, args(report)); assert(Buffer.byteLength(JSON.stringify(locator.structuredContent)) <= 32768); assert(Buffer.byteLength(locator.content[0].text) <= 8192);
   // The same serialization gate rejects an oversized local path instead of truncating an exact locator.
-  assert.throws(() => evidenceResult({ ...locator.details, locator: { ...locator.details.locator, path: canary.repeat(500) } }), error => error.message === "evidence_response_limit");
+  assert.throws(() => evidenceResult({ ...locator.details, locator: { ...locator.details.locator, path: canary.repeat(500) } }), error => error.message === "output_contract_error");
 }));
 
 test("registered scan→query discovers arbitrary tools; every lead resolves, with exact private-safe call/result/ancestry provenance", async () => fixture(async ({ save, scan, query, safe }) => {
