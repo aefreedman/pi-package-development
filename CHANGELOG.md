@@ -4,6 +4,8 @@
 
 ### Added
 
+- Native skill-eval review/bootstrap contracts with bounded safe findings/plans, confirmation refusals, scaffold stage and rollback receipts. Keep successful review findings separate from execution failure.
+
 - Versioned, producer-validated native session envelopes, exact opaque references, structured errors and independent 8 KiB direct / 32 KiB native budgets without reducing page capacity for duplicated channels.
 
 ### Changed

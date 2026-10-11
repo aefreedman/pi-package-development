@@ -1,7 +1,8 @@
+import { evalSchema, evalEffects, observeEffects, reviewProjection, bootstrapProjection, evalSuccess, evalFailure } from "./skill-eval-output.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { bootstrapSkillEval, type StarterCaseInput } from "./skill-evals/bootstrap.js";
 import { resolveExistingWithin } from "./skill-evals/path-safety.js";
 import { reviewSkillEval } from "./skill-evals/review.js";
@@ -21,37 +22,10 @@ const positiveCaseSchema = Type.Object({
   ], { description: "How the relevant prompt asks for the skill behavior" }),
 });
 
-function formatBootstrap(result: Awaited<ReturnType<typeof bootstrapSkillEval>>): string {
-  const lines = [
-    `Skill eval bootstrap: ${result.mode}`,
-    `Package: ${result.packageRoot}`,
-    `Skill: ${result.skillPath}`,
-    `Eval: ${result.evalName}`,
-    `Cases: ${result.caseCounts.positive} positive, ${result.caseCounts.negative} negative`,
-    `Package script: ${result.packageScript}`,
-    "Files:",
-    ...result.plannedFiles.map((path) => `- ${path}`),
-  ];
-  if (result.mode === "preview") lines.push("No files changed. Review this preview before applying.");
-  return lines.join("\n");
-}
-
-function formatReview(result: Awaited<ReturnType<typeof reviewSkillEval>>): string {
-  const lines = [
-    `Skill eval review: ${result.summary.errors} errors, ${result.summary.warnings} warnings, ${result.summary.infos} info`,
-    `Cases: ${result.summary.cases} total (${result.summary.positiveCases} positive, ${result.summary.negativeCases} negative)`,
-    `Eval: ${relative(result.packageRoot, result.evalDirectory).replaceAll("\\", "/")}`,
-  ];
-  for (const finding of result.findings.slice(0, 50)) {
-    lines.push(`- ${finding.level.toUpperCase()} ${finding.ruleId}${finding.path ? ` [${finding.path}]` : ""}: ${finding.message}`);
-  }
-  if (result.findings.length > 50) lines.push(`- ${result.findings.length - 50} additional findings omitted`);
-  return lines.join("\n");
-}
-
 export function registerSkillEvals(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "skill_eval_bootstrap",
+    outputSchema: evalSchema("skill_eval_bootstrap"),
     label: "Bootstrap Skill Eval",
     description: "Preview or create a package-owned behavioral eval starter for one Pi skill. Requires real positive and negative prompt examples. Preview is the default; apply writes only after explicit user authorization.",
     promptSnippet: "Preview or scaffold package-owned behavioral eval files for a Pi skill",
@@ -72,40 +46,50 @@ export function registerSkillEvals(pi: ExtensionAPI): void {
       mode: Type.Optional(Type.Union([Type.Literal("preview"), Type.Literal("apply")], { default: "preview" })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      signal?.throwIfAborted();
-      const options = {
-        workspaceRoot: ctx.cwd,
-        targetPackagePath: params.targetPackagePath,
-        skillPath: params.skillPath,
-        evalName: params.evalName,
-        positiveCases: params.positiveCases as StarterCaseInput[],
-        negativeCases: params.negativeCases as StarterCaseInput[],
-        extensionPaths: params.extensionPaths,
-        allowExtensionExecution: params.allowExtensionExecution,
-        tools: params.tools,
-        allowHostMutation: params.allowHostMutation,
-        mode: params.mode ?? "preview",
-      } as const;
-      let result;
-      if (options.mode === "apply") {
-        if (!ctx.hasUI) throw new Error("skill_eval_bootstrap apply requires an interactive/RPC confirmation; use preview in noninteractive mode");
-        const packageRoot = await resolveExistingWithin(ctx.cwd, options.targetPackagePath ?? ".");
-        const plan = await bootstrapSkillEval({ ...options, mode: "preview" });
-        const confirmed = await ctx.ui.confirm(
-          "Apply skill eval scaffold?",
-          `Create evals/${plan.evalName}, add ${plan.packageScript} (node --experimental-strip-types evals/${plan.evalName}/run-eval.ts), and add eval results/bootstrap-lock ignore rules in ${packageRoot}?`,
-        );
-        if (!confirmed) throw new Error("Skill eval scaffold apply was not confirmed");
-        result = await withFileMutationQueue(join(packageRoot, "package.json"), () => bootstrapSkillEval(options));
-      } else {
-        result = await bootstrapSkillEval(options);
+      const effects = evalEffects();
+      try {
+        signal?.throwIfAborted();
+        const options = {
+          workspaceRoot: ctx.cwd,
+          targetPackagePath: params.targetPackagePath,
+          skillPath: params.skillPath,
+          evalName: params.evalName,
+          positiveCases: params.positiveCases as StarterCaseInput[],
+          negativeCases: params.negativeCases as StarterCaseInput[],
+          extensionPaths: params.extensionPaths,
+          allowExtensionExecution: params.allowExtensionExecution,
+          tools: params.tools,
+          allowHostMutation: params.allowHostMutation,
+          mode: params.mode ?? "preview",
+          observe: (event: Parameters<typeof observeEffects>[1]) => observeEffects(effects, event),
+        } as const;
+        let result;
+        if (options.mode === "apply") {
+          if (!ctx.hasUI) throw new Error("confirmation_required");
+          const packageRoot = await resolveExistingWithin(ctx.cwd, options.targetPackagePath ?? ".");
+          const plan = await bootstrapSkillEval({ ...options, mode: "preview" });
+          const confirmed = await ctx.ui.confirm(
+            "Apply skill eval scaffold?",
+            `Create evals/${plan.evalName}, add ${plan.packageScript} (node --experimental-strip-types evals/${plan.evalName}/run-eval.ts), and add eval results/bootstrap-lock ignore rules in ${packageRoot}?`,
+          );
+          if (!confirmed) throw new Error("not_confirmed");
+          result = await withFileMutationQueue(join(packageRoot, "package.json"), () => bootstrapSkillEval(options));
+        } else {
+          result = await bootstrapSkillEval(options);
+        }
+        effects.state = options.mode === "preview" ? "none" : "completed";
+        return evalSuccess("skill_eval_bootstrap", bootstrapProjection(result), effects);
+      } catch (error) {
+        if (effects.state === "completed") effects.state = "may_have_changed";
+        if (effects.stages.rollback === "completed" && effects.stages.cleanup === "completed") effects.state = "rolled_back";
+        return evalFailure("skill_eval_bootstrap", error, effects);
       }
-      return { content: [{ type: "text", text: formatBootstrap(result) }], details: result };
     },
   });
 
   pi.registerTool({
     name: "skill_eval_review",
+    outputSchema: evalSchema("skill_eval_review"),
     label: "Review Skill Eval",
     description: "Read-only structural and methodology review of a package-owned Pi skill behavioral eval. Checks cases, trigger controls, isolation, budgets, package scripts, and result hygiene without running an agent.",
     promptSnippet: "Review a package-owned skill eval without running provider-backed trials",
@@ -115,9 +99,12 @@ export function registerSkillEvals(pi: ExtensionAPI): void {
       evalPath: Type.String({ description: "Eval directory relative to the target package" }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      signal?.throwIfAborted();
-      const result = await reviewSkillEval({ workspaceRoot: ctx.cwd, ...(params.targetPackagePath ? { targetPackagePath: params.targetPackagePath } : {}), evalPath: params.evalPath });
-      return { content: [{ type: "text", text: formatReview(result) }], details: result };
+      const effects = evalEffects(); effects.state = "none";
+      try {
+        signal?.throwIfAborted();
+        const result = await reviewSkillEval({ workspaceRoot: ctx.cwd, ...(params.targetPackagePath ? { targetPackagePath: params.targetPackagePath } : {}), evalPath: params.evalPath });
+        return evalSuccess("skill_eval_review", reviewProjection(result), effects);
+      } catch (error) { return evalFailure("skill_eval_review", error, effects); }
     },
   });
 }

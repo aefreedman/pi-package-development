@@ -14,6 +14,8 @@ export type StarterCaseInput = {
   promptKind?: PromptKind;
 };
 
+export type BootstrapStage = "lock" | "staging" | "packageJson" | "gitignore" | "evalDirectory" | "rollback" | "cleanup";
+export type BootstrapObservation = { stage: BootstrapStage; state: "started" | "completed" | "failed"; reference?: string };
 export type BootstrapOptions = {
   workspaceRoot: string;
   targetPackagePath?: string | undefined;
@@ -27,6 +29,7 @@ export type BootstrapOptions = {
   allowHostMutation?: boolean | undefined;
   mode?: "preview" | "apply" | undefined;
   templateRoot?: string;
+  observe?: (observation: BootstrapObservation) => void;
 };
 
 export type PlannedFile = { path: string; content: string };
@@ -89,6 +92,18 @@ async function loadTemplate(root: string, name: string, replacements: Record<str
   let text = await readFile(join(root, name), "utf8");
   for (const [key, value] of Object.entries(replacements)) text = text.replaceAll(`{{${key}}}`, value);
   return text;
+}
+
+async function stage<T>(options: BootstrapOptions, name: BootstrapStage, action: () => Promise<T>, reference?: string): Promise<T> {
+  try {
+    options.observe?.({ stage: name, state: "started", ...(reference ? { reference } : {}) });
+    const result = await action();
+    options.observe?.({ stage: name, state: "completed", ...(reference ? { reference } : {}) });
+    return result;
+  } catch (error) {
+    options.observe?.({ stage: name, state: "failed", ...(reference ? { reference } : {}) });
+    throw error;
+  }
 }
 
 async function bootstrapSkillEvalUnlocked(options: BootstrapOptions): Promise<BootstrapResult> {
@@ -197,28 +212,30 @@ async function bootstrapSkillEvalUnlocked(options: BootstrapOptions): Promise<Bo
 
   const staging = join(dirname(evalDirectory), `.${basename(evalDirectory)}.tmp-${process.pid}-${Date.now()}`);
   await assertNoSymlinkComponents(packageRoot, staging);
-  await mkdir(staging, { recursive: true });
   let packageCommitted = false;
   let gitignoreCommitted = false;
   try {
-    for (const item of planned) {
-      const stagedPath = join(staging, relative(evalDirectory, item.path));
-      await mkdir(dirname(stagedPath), { recursive: true });
-      await writeFile(stagedPath, item.content, "utf8");
-    }
-    await atomicWrite(packageJsonPath, nextPackageJson);
-    packageCommitted = true;
-    await atomicWrite(gitignorePath, nextIgnore);
-    gitignoreCommitted = true;
-    await rename(staging, evalDirectory);
+    await stage(options, "staging", async () => {
+      await mkdir(staging, { recursive: true });
+      for (const item of planned) {
+        const stagedPath = join(staging, relative(evalDirectory, item.path));
+        await mkdir(dirname(stagedPath), { recursive: true });
+        await writeFile(stagedPath, item.content, "utf8");
+      }
+    });
+    await stage(options, "packageJson", async () => { await atomicWrite(packageJsonPath, nextPackageJson); packageCommitted = true; }, "package.json");
+    await stage(options, "gitignore", async () => { await atomicWrite(gitignorePath, nextIgnore); gitignoreCommitted = true; }, ".gitignore");
+    await stage(options, "evalDirectory", () => rename(staging, evalDirectory), `evals/${evalName}`);
   } catch (error) {
-    await rm(staging, { recursive: true, force: true });
-    await rm(evalDirectory, { recursive: true, force: true });
-    if (packageCommitted) await atomicWrite(packageJsonPath, packageJsonText);
-    if (gitignoreCommitted) {
-      if (gitignoreExisted) await atomicWrite(gitignorePath, currentIgnore);
-      else await rm(gitignorePath, { force: true });
-    }
+    await stage(options, "rollback", async () => {
+      await rm(staging, { recursive: true, force: true });
+      await rm(evalDirectory, { recursive: true, force: true });
+      if (packageCommitted) await atomicWrite(packageJsonPath, packageJsonText);
+      if (gitignoreCommitted) {
+        if (gitignoreExisted) await atomicWrite(gitignorePath, currentIgnore);
+        else await rm(gitignorePath, { force: true });
+      }
+    });
     throw error;
   }
   return result;
@@ -228,10 +245,12 @@ export async function bootstrapSkillEval(options: BootstrapOptions): Promise<Boo
   if ((options.mode ?? "preview") === "preview") return bootstrapSkillEvalUnlocked(options);
   const packageRoot = await resolveExistingWithin(options.workspaceRoot, options.targetPackagePath ?? ".");
   const lockPath = join(packageRoot, ".pi-package-development-skill-evals-bootstrap.lock");
-  let lock;
+  let lock: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    lock = await open(lockPath, "wx", 0o600);
-    await lock.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, "utf8");
+    await stage(options, "lock", async () => {
+      lock = await open(lockPath, "wx", 0o600);
+      await lock.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, "utf8");
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another skill eval bootstrap may be active. Verify no apply is running before removing ${lockPath}`);
     throw error;
@@ -239,7 +258,6 @@ export async function bootstrapSkillEval(options: BootstrapOptions): Promise<Boo
   try {
     return await bootstrapSkillEvalUnlocked(options);
   } finally {
-    await lock.close();
-    await rm(lockPath, { force: true });
+    await stage(options, "cleanup", async () => { await lock!.close(); await rm(lockPath, { force: true }); });
   }
 }

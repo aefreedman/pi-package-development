@@ -22,8 +22,7 @@ test("bootstrap confirmation identifies the resolved eval mutations", async () =
     const bootstrap = tools.get("skill_eval_bootstrap");
     assert.ok(bootstrap);
 
-    await assert.rejects(
-      bootstrap.execute("confirmation", {
+    const denied = await bootstrap.execute("confirmation", {
         targetPackagePath: "target",
         skillPath: "skills/directory-name/SKILL.md",
         positiveCases: [{ id: "positive", prompt: "Use this skill.", promptKind: "explicit" }],
@@ -38,9 +37,10 @@ test("bootstrap confirmation identifies the resolved eval mutations", async () =
             return false;
           },
         },
-      }),
-      /was not confirmed/,
-    );
+      });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.structuredContent.error.code, "not_confirmed");
+    assert.equal(denied.structuredContent.effects.state, "not_dispatched");
 
     assert.match(confirmation, /evals\/resolved-eval-name/);
     assert.match(confirmation, /eval:resolved-eval-name/);
