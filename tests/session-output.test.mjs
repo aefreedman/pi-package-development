@@ -33,11 +33,14 @@ test("actual native envelope budget preserves ten rows independently of wrapper 
     assert.equal(Value.Check(tools.get("pi_query_session").outputSchema, page.structuredContent), true);
     assert(page.details.rows[0].call.fields.every(field => field.type === "null"));
     assert.throws(() => evidenceResult({ ...page.details, privateUnexpectedField: "not-admitted" }), /output_contract_error/);
+    assert.throws(() => evidenceResult({ schemaVersion: 2, reportRef: scan.details.reportRef, expiresAt: scan.details.expiresAt, view: "locator", eventRef: page.details.rows[0].eventRef, target: "event", warning: "Explicit opt-in", sourceChecks: 1, evidenceCoverage: page.details.evidenceCoverage,
+      locator: { path: "x".repeat(40000), line: 1, sourceRef: page.details.rows[0].provenance.sourceRef, entryRef: page.details.rows[0].provenance.entryRef, selected: true, duplicate: false } }), /evidence_response_limit/, "compact native byte ceiling is enforced before reference publication");
     const release = await execute("pi_query_session", { reportRef: scan.details.reportRef, release: true });
     assert.equal(release.structuredContent.effects, "memory_changed");
     const expired = await execute("pi_query_session", { reportRef: scan.details.reportRef });
     assert.equal(expired.isError, true); assert.equal(expired.structuredContent.ok, false);
     assert.equal(expired.structuredContent.error.code, "expired_report");
+    assert.equal(expired.structuredContent.effects, "memory_may_have_changed");
     assert(Value.Check(tools.get("pi_query_session").outputSchema, expired.structuredContent));
   } finally { for (const handler of handlers) await handler({}, ctx); await rm(root, { recursive: true, force: true }); }
 });

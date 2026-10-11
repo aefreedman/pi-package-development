@@ -268,39 +268,39 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
     async execute(_id, params: Params, signal, onUpdate, ctx) {
       let saved = false;
       try {
-      if (params.limitLeads !== undefined && (!Number.isInteger(params.limitLeads) || params.limitLeads < 1 || params.limitLeads > 10)) throw new Error("invalid_page_limit");
-      const generation = store.generation;
-      const corpus = await scanSessionCorpus(params, ctx.cwd, signal, (files, bytes) => onUpdate?.({ content: [{ type: "text", text: `Scanning historical evidence: ${files} files, ${bytes} bytes read.` }], details: {} }));
-      const builder = new EvidenceBuilder(); const summaries: Summary[] = [];
-      for (const source of corpus.sources) {
-        if (!corpus.continueAnalysis()) break;
-        summaries.push(await analyzeSessionFile(source, builder, corpus.continueAnalysis));
-      }
-      corpus.continueAnalysis();
-      const sum = (key: keyof Summary) => summaries.reduce((n, s) => n + (typeof s[key] === "number" ? s[key] as number : 0), 0);
-      const outcomes = (key: "nativeOutcomes" | "semanticOutcomes") => {
-        const total: Record<string, number> = {};
-        for (const summary of summaries) for (const [name, count] of Object.entries(summary[key])) total[name] = (total[name] ?? 0) + count;
-        return total;
-      };
-      if (corpus.coverage.stopReason === "cancelled") throw new Error("evidence_query_cancelled");
-      if (corpus.coverage.unreadableFiles > 0 && corpus.sources.every(source => source.unreadable)) throw new Error("session_operation_failed");
-      const index = builder.finish();
-      const incomplete = corpusIncomplete(corpus.coverage) || summaries.some(s => s.incomplete) || index.coverage.omittedEvents > 0;
-      index.coverage.analysisIncomplete = incomplete;
-      const report = store.save(index, ctx.sessionManager ?? ctx.cwd, generation);
-      saved = true;
-      return store.scanPage(report, {
-        analysisStatus: incomplete ? "incomplete" : "complete", corpus: corpus.coverage,
-        eventWindow: corpus.window, scanLimits: { ...corpus.limits, maxNestedCallsPerResult: EVIDENCE_LIMITS.nestedCalls },
-        totals: { toolCalls: sum("toolCalls"), failures: sum("failures"), userMessages: sum("userMessages") },
-        extraction: { processedSources: summaries.length,
-          ...Object.fromEntries(["unresolvedCalls", "unresolvedResults", "unsupportedMessages", "unknownOutcomes", "heuristicLeads", "legacyCorrelations", "assistantErrors", "assistantAborts"].map(key => [key, sum(key as keyof Summary)])),
-          nested: { observedCalls: sum("nestedCalls"), failures: sum("nestedFailures"), unknownOutcomes: sum("nestedUnknownOutcomes"), incompleteResults: sum("nestedIncompleteResults"), malformedRecords: sum("nestedMalformedRecords"), omittedCalls: sum("nestedOmittedCalls") },
-          nativeOutcomes: outcomes("nativeOutcomes"), semanticOutcomes: outcomes("semanticOutcomes") },
-        method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked. Top-level totals exclude nested calls. Nested metadata has no full results or semantic outcomes; durationMs is recorded metadata, not a message span. Child provenance is the parent result line plus nested position, never a standalone call locator; complete=false may hide an unknown number of calls.",
-        privacy: "Opaque report-local refs with vetted literal public tool labels only. Source text, paths, native IDs, unvetted tool names, argument keys/values and result details omitted. Local paths require a separate explicitly authorized locator query.",
-      }, params.limitLeads);
+        if (params.limitLeads !== undefined && (!Number.isInteger(params.limitLeads) || params.limitLeads < 1 || params.limitLeads > 10)) throw new Error("invalid_page_limit");
+        const generation = store.generation;
+        const corpus = await scanSessionCorpus(params, ctx.cwd, signal, (files, bytes) => onUpdate?.({ content: [{ type: "text", text: `Scanning historical evidence: ${files} files, ${bytes} bytes read.` }], details: {} }));
+        const builder = new EvidenceBuilder(); const summaries: Summary[] = [];
+        for (const source of corpus.sources) {
+          if (!corpus.continueAnalysis()) break;
+          summaries.push(await analyzeSessionFile(source, builder, corpus.continueAnalysis));
+        }
+        corpus.continueAnalysis();
+        const sum = (key: keyof Summary) => summaries.reduce((n, s) => n + (typeof s[key] === "number" ? s[key] as number : 0), 0);
+        const outcomes = (key: "nativeOutcomes" | "semanticOutcomes") => {
+          const total: Record<string, number> = {};
+          for (const summary of summaries) for (const [name, count] of Object.entries(summary[key])) total[name] = (total[name] ?? 0) + count;
+          return total;
+        };
+        if (corpus.coverage.stopReason === "cancelled") throw new Error("evidence_query_cancelled");
+        if (corpus.coverage.unreadableFiles > 0 && corpus.sources.every(source => source.unreadable)) throw new Error("session_operation_failed");
+        const index = builder.finish();
+        const incomplete = corpusIncomplete(corpus.coverage) || summaries.some(s => s.incomplete) || index.coverage.omittedEvents > 0;
+        index.coverage.analysisIncomplete = incomplete;
+        const report = store.save(index, ctx.sessionManager ?? ctx.cwd, generation);
+        saved = true;
+        return store.scanPage(report, {
+          analysisStatus: incomplete ? "incomplete" : "complete", corpus: corpus.coverage,
+          eventWindow: corpus.window, scanLimits: { ...corpus.limits, maxNestedCallsPerResult: EVIDENCE_LIMITS.nestedCalls },
+          totals: { toolCalls: sum("toolCalls"), failures: sum("failures"), userMessages: sum("userMessages") },
+          extraction: { processedSources: summaries.length,
+            ...Object.fromEntries(["unresolvedCalls", "unresolvedResults", "unsupportedMessages", "unknownOutcomes", "heuristicLeads", "legacyCorrelations", "assistantErrors", "assistantAborts"].map(key => [key, sum(key as keyof Summary)])),
+            nested: { observedCalls: sum("nestedCalls"), failures: sum("nestedFailures"), unknownOutcomes: sum("nestedUnknownOutcomes"), incompleteResults: sum("nestedIncompleteResults"), malformedRecords: sum("nestedMalformedRecords"), omittedCalls: sum("nestedOmittedCalls") },
+            nativeOutcomes: outcomes("nativeOutcomes"), semanticOutcomes: outcomes("semanticOutcomes") },
+          method: "Unreviewed signatures, not diagnoses or human corrections. Message-observed spans are not execution latency. Timeout/abort state does not establish whether effects occurred. Current source not checked. Top-level totals exclude nested calls. Nested metadata has no full results or semantic outcomes; durationMs is recorded metadata, not a message span. Child provenance is the parent result line plus nested position, never a standalone call locator; complete=false may hide an unknown number of calls.",
+          privacy: "Opaque report-local refs with vetted literal public tool labels only. Source text, paths, native IDs, unvetted tool names, argument keys/values and result details omitted. Local paths require a separate explicitly authorized locator query.",
+        }, params.limitLeads);
       } catch (error) { return sessionFailure("pi_analyze_session", error, saved); }
     },
   });
@@ -318,7 +318,7 @@ export function registerSessionAnalysis(pi: ExtensionAPI): void {
     }, { additionalProperties: false }),
     async execute(_id, params: QueryParams, signal, _onUpdate, ctx) {
       try { return await store.query(params, ctx.sessionManager ?? ctx.cwd, signal); }
-      catch (error) { return sessionFailure("pi_query_session", error, params.release === true || (error instanceof Error && error.message === "stale_source")); }
+      catch (error) { return sessionFailure("pi_query_session", error, params.release === true || (error instanceof Error && ["stale_source", "expired_report"].includes(error.message))); }
     },
   });
 }
