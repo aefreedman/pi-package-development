@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-12
+
 ### Added
 
 - Native skill-eval review/bootstrap contracts with bounded safe findings/plans, confirmation refusals, scaffold stage and rollback receipts. Keep successful review findings separate from execution failure.
@@ -10,7 +12,8 @@
 
 ### Changed
 
-- Align development validation with Pi 1.1.0 without changing the package version.
+- Align development validation with Pi 1.1.0; consumer-managed Pi peers remain unchanged.
+- Bound skill-eval adapter details to safe public projections instead of absolute package roots or raw config-bearing messages; keep producer result interfaces and scaffold effect uncertainty intact.
 
 ### Fixed
 
