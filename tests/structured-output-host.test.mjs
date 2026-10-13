@@ -8,10 +8,11 @@ import { createAgentSession, createCodemodeExtension, DefaultResourceLoader, Mod
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import register from "../dist/pi/register.js";
 import { bootstrapSkillEval } from "../dist/pi/skill-evals/bootstrap.js";
+const declaredPi = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies;
 const runtimeVersion = VERSION;
 
 test("current Pi compiled entry: direct, codemode, nested outcomes, hooks and transcript boundary", { timeout: 60000 }, async t => {
-  assert.equal(runtimeVersion, "1.1.0");
+  assert.equal(runtimeVersion, declaredPi["@earendil-works/pi-coding-agent"]);
   const root = await mkdtemp(join(tmpdir(), "pi-development-host-"));
   let session;
   const events = [], outputs = [], queue = [], nestedOutcomes = [];
